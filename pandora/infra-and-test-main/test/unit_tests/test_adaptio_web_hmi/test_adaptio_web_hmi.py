@@ -605,6 +605,132 @@ class TestAdaptioWebHmiApiMethods:
         assert result.payload == response.payload
         mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
 
+    def test_get_weld_process_parameters(self, mock_websocket_client_sync):
+        """Test getting weld process parameters list."""
+        # Preparation
+        request = AdaptioWebHmiMessage(name="GetWeldProcessParameters", payload={})
+        response = AdaptioWebHmiMessage(
+            name="GetWeldProcessParametersRsp",
+            payload={"result": "ok", "weldProcessParameters": [{"id": 1, "name": "WPP1"}]},
+        )
+        mock_websocket_client_sync.receive_message.return_value = str(response)
+
+        # Execution
+        client = AdaptioWebHmi(uri="ws://testserver")
+        result = client.get_weld_process_parameters()
+
+        # Verification
+        assert result.name == MessageName.GET_WELD_PROCESS_PARAMETERS_RSP.value
+        assert result.payload == response.payload
+        mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+        mock_websocket_client_sync.receive_message.assert_called_once()
+
+    def test_update_weld_process_parameters(self, mock_websocket_client_sync):
+        """Test updating weld process parameters."""
+        # Preparation
+        request = AdaptioWebHmiMessage(
+            name="UpdateWeldProcessParameters",
+            payload={
+                "id": 1,
+                "name": "UpdatedWPP",
+                "method": "dc",
+                "regulationType": "cc",
+                "startAdjust": 10,
+                "startType": "scratch",
+                "voltage": 26.0,
+                "current": 150.0,
+                "wireSpeed": 12.5,
+                "iceWireSpeed": 0.0,
+                "acFrequency": 60.0,
+                "acOffset": 1.2,
+                "acPhaseShift": 0.5,
+                "craterFillTime": 2.0,
+                "burnBackTime": 1.0,
+            },
+        )
+        response = AdaptioWebHmiMessage(name="UpdateWeldProcessParametersRsp", payload={"result": "ok"})
+        mock_websocket_client_sync.receive_message.return_value = str(response)
+
+        # Execution
+        client = AdaptioWebHmi(uri="ws://testserver")
+        result = client.update_weld_process_parameters(**request.payload)
+
+        # Verification
+        assert result.name == MessageName.UPDATE_WELD_PROCESS_PARAMETERS_RSP.value
+        assert result.payload == response.payload
+        mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+
+    def test_remove_weld_process_parameters(self, mock_websocket_client_sync):
+        """Test removing weld process parameters."""
+        # Preparation
+        request = AdaptioWebHmiMessage(name="RemoveWeldProcessParameters", payload={"id": 1})
+        response = AdaptioWebHmiMessage(name="RemoveWeldProcessParametersRsp", payload={"result": "ok"})
+        mock_websocket_client_sync.receive_message.return_value = str(response)
+
+        # Execution
+        client = AdaptioWebHmi(uri="ws://testserver")
+        result = client.remove_weld_process_parameters(**request.payload)
+
+        # Verification
+        assert result.name == MessageName.REMOVE_WELD_PROCESS_PARAMETERS_RSP.value
+        assert result.payload == response.payload
+        mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+
+    def test_get_weld_data_sets(self, mock_websocket_client_sync):
+        """Test getting weld data sets list."""
+        # Preparation
+        request = AdaptioWebHmiMessage(name="GetWeldDataSets", payload={})
+        response = AdaptioWebHmiMessage(
+            name="GetWeldDataSetsRsp",
+            payload={"result": "ok", "weldDataSets": [{"id": 1, "name": "WDS1", "ws1WppId": 1, "ws2WppId": 2}]},
+        )
+        mock_websocket_client_sync.receive_message.return_value = str(response)
+
+        # Execution
+        client = AdaptioWebHmi(uri="ws://testserver")
+        result = client.get_weld_data_sets()
+
+        # Verification
+        assert result.name == MessageName.GET_WELD_DATA_SETS_RSP.value
+        assert result.payload == response.payload
+        mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+        mock_websocket_client_sync.receive_message.assert_called_once()
+
+    def test_update_weld_data_set(self, mock_websocket_client_sync):
+        """Test updating a weld data set."""
+        # Preparation
+        request = AdaptioWebHmiMessage(
+            name="UpdateWeldDataSet",
+            payload={"id": 1, "name": "UpdatedWDS", "ws1WppId": 2, "ws2WppId": 3},
+        )
+        response = AdaptioWebHmiMessage(name="UpdateWeldDataSetRsp", payload={"result": "ok"})
+        mock_websocket_client_sync.receive_message.return_value = str(response)
+
+        # Execution
+        client = AdaptioWebHmi(uri="ws://testserver")
+        result = client.update_weld_data_set(**request.payload)
+
+        # Verification
+        assert result.name == MessageName.UPDATE_WELD_DATA_SET_RSP.value
+        assert result.payload == response.payload
+        mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+
+    def test_remove_weld_data_set(self, mock_websocket_client_sync):
+        """Test removing a weld data set."""
+        # Preparation
+        request = AdaptioWebHmiMessage(name="RemoveWeldDataSet", payload={"id": 1})
+        response = AdaptioWebHmiMessage(name="RemoveWeldDataSetRsp", payload={"result": "ok"})
+        mock_websocket_client_sync.receive_message.return_value = str(response)
+
+        # Execution
+        client = AdaptioWebHmi(uri="ws://testserver")
+        result = client.remove_weld_data_set(**request.payload)
+
+        # Verification
+        assert result.name == MessageName.REMOVE_WELD_DATA_SET_RSP.value
+        assert result.payload == response.payload
+        mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+
     def test_get_joint_geometry(self, mock_websocket_client_sync):
         """Test getting joint geometry."""
         # Preparation
