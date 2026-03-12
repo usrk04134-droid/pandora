@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from enum import Enum, unique
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List, Union
 
 import websockets.exceptions as websocketsExc
 from loguru import logger
@@ -40,6 +40,10 @@ class MessageName(Enum):
     REMOVE_WELD_DATA_SET_RSP = "RemoveWeldDataSetRsp"
     SELECT_WELD_DATA_SET = "SelectWeldDataSet"
     SELECT_WELD_DATA_SET_RSP = "SelectWeldDataSetRsp"
+    SUBSCRIBE_ARC_STATE = "SubscribeArcState"
+    SUBSCRIBE_ARC_STATE_RSP = "SubscribeArcStateRsp"
+    GET_ARC_STATE = "GetArcState"
+    GET_ARC_STATE_RSP = "GetArcStateRsp"
     SET_JOINT_GEOMETRY = "SetJointGeometry"
     GET_JOINT_GEOMETRY = "GetJointGeometry"
     GET_JOINT_GEOMETRY_RSP = "GetJointGeometryRsp"
@@ -69,22 +73,22 @@ class MessageName(Enum):
 
 @unique
 class ActivityStatus(Enum):
-    """Enum class for Adaptio activity status."""
+    """Enum class for Adaptio activity status (matches Gen2 coordination::ActivityStatusE)."""
 
     IDLE = 0
     LASER_TORCH_CALIBRATION = 1
     WELD_OBJECT_CALIBRATION = 2
-    TRACKING = 3
-    SERVICE_MODE_TRACKING = 4
-    SERVICE_MODE_KINEMATICS = 5
-    SERVICE_MODE_IMAGE_COLLECTION = 6
+    CALIBRATION_AUTO_MOVE = 3
+    TRACKING = 4
+    LW_CALIBRATION = 5
+    MANUAL_WELDING = 6
 
 
 class AdaptioWebHmiMessage(BaseModel):
     """Base class for the Adaptio WebHMI message format."""
 
     name: str
-    payload: Dict[str, Any]
+    payload: Union[Dict[str, Any], List[Dict[str, Any]]]
     result: str | None = None  # New separate result field in response
 
     def __str__(self):
@@ -497,6 +501,41 @@ class AdaptioWebHmi:
             condition,
             MessageName.SELECT_WELD_DATA_SET.value,
             MessageName.SELECT_WELD_DATA_SET_RSP.value,
+            payload,
+        )
+
+        return response
+
+    def subscribe_arc_state(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
+        """Subscribe to arc state change notifications.
+
+        After subscribing, the server will push ``ArcState`` messages whenever
+        the arc state changes. The response confirms the subscription was
+        accepted.
+        """
+        payload = {}
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.SUBSCRIBE_ARC_STATE.value,
+            MessageName.SUBSCRIBE_ARC_STATE_RSP.value,
+            payload,
+        )
+
+        return response
+
+    def get_arc_state(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
+        """Get the current arc state.
+
+        Returns the current arc state string (``idle``, ``configured``,
+        ``ready``, ``starting``, or ``active``).
+        """
+        payload = {}
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.GET_ARC_STATE.value,
+            MessageName.GET_ARC_STATE_RSP.value,
             payload,
         )
 

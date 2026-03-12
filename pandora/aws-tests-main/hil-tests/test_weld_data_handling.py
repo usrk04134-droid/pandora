@@ -42,6 +42,11 @@ def _call_adaptio(uri, method_name, **kwargs):
         cleanup_web_hmi_client(client)
 
 
+def _to_list(payload):
+    """Return *payload* as a list, or an empty list if it is not a list."""
+    return payload if isinstance(payload, list) else []
+
+
 def _get_result(response):
     """Extract 'result' field from an Adaptio response (object or dict)."""
     if isinstance(response, dict):
@@ -52,9 +57,16 @@ def _get_result(response):
 
 
 def _get_payload(response):
-    """Extract payload dict from an Adaptio response (object or dict)."""
+    """Extract the payload value from an Adaptio response.
+
+    Gen2 uses an array payload for list responses (GetWeldDataSetsRsp,
+    GetWeldProcessParametersRsp) and a dict payload for scalar responses.
+    """
     if isinstance(response, dict):
-        return response
+        # Raw dict returned when pydantic model_validate_json fails (e.g. on
+        # failure responses that omit the 'payload' field).  Return the value
+        # stored under the "payload" key, falling back to an empty dict.
+        return response.get("payload", {})
     return response.payload if hasattr(response, "payload") else {}
 
 
@@ -87,9 +99,7 @@ class TestWeldProcessParameters:
             response = run_sync_in_thread(
                 _call_adaptio, uri, "get_weld_process_parameters", timeout=DEFAULT_TIMEOUT
             )
-            payload = _get_payload(response)
-            entries = payload.get("weldProcessParameters", []) if isinstance(payload, dict) else []
-            for entry in entries:
+            for entry in _to_list(_get_payload(response)):
                 if entry.get("name") == name:
                     run_sync_in_thread(
                         _call_adaptio, uri, "remove_weld_process_parameters",
@@ -166,9 +176,8 @@ class TestWeldProcessParameters:
         result = _get_result(response)
         assert result == "ok", f"Expected 'ok' but got '{result}'"
 
-        payload = _get_payload(response)
-        entries = payload.get("weldProcessParameters", [])
-        assert isinstance(entries, list), "Expected 'weldProcessParameters' to be a list"
+        entries = _get_payload(response)
+        assert isinstance(entries, list), "Expected GetWeldProcessParametersRsp payload to be a list"
 
         names = [e.get("name") for e in entries]
         assert self.WPP_NAME in names, (
@@ -193,7 +202,7 @@ class TestWeldProcessParameters:
         )
         assert _get_result(get_resp) == "ok", "Pre-condition: GetWeldProcessParameters failed"
 
-        entries = _get_payload(get_resp).get("weldProcessParameters", [])
+        entries = _get_payload(get_resp)
         wpp = next((e for e in entries if e.get("name") == self.WPP_NAME), None)
         assert wpp is not None, f"Pre-condition: WPP '{self.WPP_NAME}' not found in list"
 
@@ -240,7 +249,7 @@ class TestWeldProcessParameters:
         get_resp = run_sync_in_thread(
             _call_adaptio, uri, "get_weld_process_parameters", timeout=DEFAULT_TIMEOUT
         )
-        entries = _get_payload(get_resp).get("weldProcessParameters", [])
+        entries = _get_payload(get_resp)
         wpp = next((e for e in entries if e.get("name") == self.WPP_NAME), None)
         assert wpp is not None, f"Pre-condition: WPP '{self.WPP_NAME}' not found"
 
@@ -257,8 +266,8 @@ class TestWeldProcessParameters:
         verify_resp = run_sync_in_thread(
             _call_adaptio, uri, "get_weld_process_parameters", timeout=DEFAULT_TIMEOUT
         )
-        remaining = _get_payload(verify_resp).get("weldProcessParameters", [])
-        names = [e.get("name") for e in remaining]
+        remaining = _get_payload(verify_resp)
+        names = [e.get("name") for e in _to_list(remaining)]
         assert self.WPP_NAME not in names, (
             f"WPP '{self.WPP_NAME}' still present after removal"
         )
@@ -295,8 +304,7 @@ class TestWeldDataSets:
             response = run_sync_in_thread(
                 _call_adaptio, uri, "get_weld_process_parameters", timeout=DEFAULT_TIMEOUT
             )
-            entries = _get_payload(response).get("weldProcessParameters", [])
-            entry = next((e for e in entries if e.get("name") == name), None)
+            entry = next((e for e in _to_list(_get_payload(response)) if e.get("name") == name), None)
             return entry["id"] if entry else None
         except Exception as exc:
             logger.warning(f"Could not get WPP id for '{name}': {exc}")
@@ -308,8 +316,7 @@ class TestWeldDataSets:
             response = run_sync_in_thread(
                 _call_adaptio, uri, "get_weld_data_sets", timeout=DEFAULT_TIMEOUT
             )
-            entries = _get_payload(response).get("weldDataSets", [])
-            for entry in entries:
+            for entry in _to_list(_get_payload(response)):
                 if entry.get("name") == name:
                     run_sync_in_thread(
                         _call_adaptio, uri, "remove_weld_data_set",
@@ -324,8 +331,7 @@ class TestWeldDataSets:
             response = run_sync_in_thread(
                 _call_adaptio, uri, "get_weld_process_parameters", timeout=DEFAULT_TIMEOUT
             )
-            entries = _get_payload(response).get("weldProcessParameters", [])
-            for entry in entries:
+            for entry in _to_list(_get_payload(response)):
                 if entry.get("name") == name:
                     run_sync_in_thread(
                         _call_adaptio, uri, "remove_weld_process_parameters",
@@ -451,9 +457,8 @@ class TestWeldDataSets:
         result = _get_result(response)
         assert result == "ok", f"Expected 'ok' but got '{result}'"
 
-        payload = _get_payload(response)
-        entries = payload.get("weldDataSets", [])
-        assert isinstance(entries, list), "Expected 'weldDataSets' to be a list"
+        entries = _get_payload(response)
+        assert isinstance(entries, list), "Expected GetWeldDataSetsRsp payload to be a list"
 
         names = [e.get("name") for e in entries]
         assert self.WDS_NAME in names, (
@@ -476,7 +481,7 @@ class TestWeldDataSets:
         get_resp = run_sync_in_thread(
             _call_adaptio, uri, "get_weld_data_sets", timeout=DEFAULT_TIMEOUT
         )
-        entries = _get_payload(get_resp).get("weldDataSets", [])
+        entries = _get_payload(get_resp)
         wds = next((e for e in entries if e.get("name") == self.WDS_NAME), None)
         assert wds is not None, f"Pre-condition: WDS '{self.WDS_NAME}' not found"
 
@@ -524,7 +529,7 @@ class TestWeldDataSets:
         get_resp = run_sync_in_thread(
             _call_adaptio, uri, "get_weld_data_sets", timeout=DEFAULT_TIMEOUT
         )
-        entries = _get_payload(get_resp).get("weldDataSets", [])
+        entries = _get_payload(get_resp)
         wds = next((e for e in entries if e.get("name") == self.WDS_NAME), None)
         assert wds is not None, f"Pre-condition: WDS '{self.WDS_NAME}' not found"
 
@@ -540,7 +545,7 @@ class TestWeldDataSets:
         verify_resp = run_sync_in_thread(
             _call_adaptio, uri, "get_weld_data_sets", timeout=DEFAULT_TIMEOUT
         )
-        remaining = _get_payload(verify_resp).get("weldDataSets", [])
+        remaining = _get_payload(verify_resp)
         names = [e.get("name") for e in remaining]
         assert self.WDS_NAME not in names, (
             f"WDS '{self.WDS_NAME}' still present after removal"
@@ -572,3 +577,220 @@ class TestWeldDataSets:
             f"Expected failure when removing WPP referenced by a WDS, but got '{result}'"
         )
         logger.info("RemoveWeldProcessParameters correctly rejected when WPP is referenced by a WDS")
+
+
+class TestSelectWeldDataSet:
+    """Test suite for the SelectWeldDataSet operation — the key step for starting weld.
+
+    The welding lifecycle (from the WebHMI side) is:
+    1. Create Weld Process Parameters (WPP) for each weld system.
+    2. Create a Weld Data Set (WDS) referencing those WPPs.
+    3. SelectWeldDataSet → Adaptio configures the weld systems and the arc
+       state transitions to CONFIGURED, then to READY once the power sources
+       report READY_TO_START.
+    4. The operator presses the hardware start button which starts the arc.
+
+    These tests verify step 3 (SelectWeldDataSet and arc state queries) which
+    is the WebHMI-observable part of the weld-start flow.  No PLC or hardware
+    state is checked.
+    """
+
+    WPP_NAME_WS1 = "test_wpp_ws1_select"
+    WPP_NAME_WS2 = "test_wpp_ws2_select"
+    WDS_NAME = "test_wds_select"
+
+    WPP_BASE = {
+        "method": "dc",
+        "regulationType": "cc",
+        "startAdjust": 10,
+        "startType": "scratch",
+        "voltage": 24.5,
+        "current": 150.0,
+        "wireSpeed": 12.5,
+        "iceWireSpeed": 0.0,
+        "acFrequency": 60.0,
+        "acOffset": 1.2,
+        "acPhaseShift": 0.5,
+        "craterFillTime": 2.0,
+        "burnBackTime": 1.0,
+    }
+
+    def _get_list_payload(self, uri, method_name):
+        """Call a list-returning method and return the payload as a list."""
+        response = run_sync_in_thread(
+            _call_adaptio, uri, method_name, timeout=DEFAULT_TIMEOUT
+        )
+        return _to_list(_get_payload(response))
+
+    def _cleanup(self, uri):
+        """Best-effort cleanup of all test-owned entries."""
+        try:
+            for wds in self._get_list_payload(uri, "get_weld_data_sets"):
+                if wds.get("name") == self.WDS_NAME:
+                    run_sync_in_thread(
+                        _call_adaptio, uri, "remove_weld_data_set",
+                        id=wds["id"], timeout=DEFAULT_TIMEOUT,
+                    )
+        except Exception as exc:
+            logger.warning(f"WDS cleanup failed: {exc}")
+
+        for wpp_name in (self.WPP_NAME_WS1, self.WPP_NAME_WS2):
+            try:
+                for wpp in self._get_list_payload(uri, "get_weld_process_parameters"):
+                    if wpp.get("name") == wpp_name:
+                        run_sync_in_thread(
+                            _call_adaptio, uri, "remove_weld_process_parameters",
+                            id=wpp["id"], timeout=DEFAULT_TIMEOUT,
+                        )
+            except Exception as exc:
+                logger.warning(f"WPP cleanup for '{wpp_name}' failed: {exc}")
+
+    @pytest.fixture()
+    def wds_id(self, request):
+        """Create a complete WPP + WDS setup and return the WDS ID."""
+        uri = request.config.WEB_HMI_URI
+
+        self._cleanup(uri)
+
+        resp1 = run_sync_in_thread(
+            _call_adaptio, uri, "add_weld_process_parameters",
+            timeout=DEFAULT_TIMEOUT, **{**self.WPP_BASE, "name": self.WPP_NAME_WS1}
+        )
+        assert _get_result(resp1) == "ok", "Pre-condition: WPP ws1 creation failed"
+
+        resp2 = run_sync_in_thread(
+            _call_adaptio, uri, "add_weld_process_parameters",
+            timeout=DEFAULT_TIMEOUT, **{**self.WPP_BASE, "name": self.WPP_NAME_WS2}
+        )
+        assert _get_result(resp2) == "ok", "Pre-condition: WPP ws2 creation failed"
+
+        wpp_list = self._get_list_payload(uri, "get_weld_process_parameters")
+        ws1_id = next((e["id"] for e in wpp_list if e.get("name") == self.WPP_NAME_WS1), None)
+        ws2_id = next((e["id"] for e in wpp_list if e.get("name") == self.WPP_NAME_WS2), None)
+        assert ws1_id is not None, "Pre-condition: WPP ws1 not found"
+        assert ws2_id is not None, "Pre-condition: WPP ws2 not found"
+
+        add_wds = run_sync_in_thread(
+            _call_adaptio, uri, "add_weld_data_set",
+            timeout=DEFAULT_TIMEOUT,
+            name=self.WDS_NAME, ws1WppId=ws1_id, ws2WppId=ws2_id,
+        )
+        assert _get_result(add_wds) == "ok", "Pre-condition: WDS creation failed"
+
+        wds_list = self._get_list_payload(uri, "get_weld_data_sets")
+        wds_id = next((e["id"] for e in wds_list if e.get("name") == self.WDS_NAME), None)
+        assert wds_id is not None, "Pre-condition: WDS not found"
+
+        yield wds_id
+
+        self._cleanup(uri)
+
+    def test_select_weld_data_set_succeeds(self, request, wds_id):
+        """SelectWeldDataSet with a valid WDS ID should succeed.
+
+        This is the key WebHMI call that configures the weld systems with the
+        process parameters from the selected data set, enabling the operator to
+        start welding.
+        """
+        uri = request.config.WEB_HMI_URI
+
+        response = run_sync_in_thread(
+            _call_adaptio, uri, "select_weld_data_set",
+            timeout=DEFAULT_TIMEOUT, id=wds_id,
+        )
+        logger.debug(f"SelectWeldDataSet response: {response}")
+
+        result = _get_result(response)
+        assert result == "ok", f"Expected 'ok' but got '{result}'"
+        logger.info(f"SelectWeldDataSet succeeded for WDS id={wds_id}")
+
+    def test_select_weld_data_set_nonexistent_id_fails(self, request, wds_id):
+        """SelectWeldDataSet with a non-existent WDS ID should fail."""
+        uri = request.config.WEB_HMI_URI
+
+        response = run_sync_in_thread(
+            _call_adaptio, uri, "select_weld_data_set",
+            timeout=DEFAULT_TIMEOUT, id=999999,
+        )
+        logger.debug(f"SelectWeldDataSet (bad id) response: {response}")
+
+        result = _get_result(response)
+        assert result != "ok", (
+            f"Expected failure when selecting non-existent WDS ID, but got '{result}'"
+        )
+        logger.info("SelectWeldDataSet with non-existent ID correctly rejected")
+
+    def test_get_arc_state_returns_valid_state(self, request, wds_id):
+        """GetArcState should return a valid arc state string.
+
+        Valid states (from Gen2 ArcState enum): idle, configured, ready,
+        starting, active.
+        """
+        uri = request.config.WEB_HMI_URI
+
+        response = run_sync_in_thread(
+            _call_adaptio, uri, "get_arc_state",
+            timeout=DEFAULT_TIMEOUT,
+        )
+        logger.debug(f"GetArcState response: {response}")
+
+        result = _get_result(response)
+        assert result == "ok", f"Expected 'ok' but got '{result}'"
+
+        payload = _get_payload(response)
+        state = payload.get("state") if isinstance(payload, dict) else None
+        valid_states = {"idle", "configured", "ready", "starting", "active"}
+        assert state in valid_states, (
+            f"Expected arc state to be one of {valid_states}, got '{state}'"
+        )
+        logger.info(f"GetArcState returned state='{state}'")
+
+    def test_arc_state_is_configured_after_select(self, request, wds_id):
+        """After SelectWeldDataSet succeeds, arc state must be at least 'configured'.
+
+        When a WDS is selected, the arc state transitions from IDLE to CONFIGURED
+        (waiting for weld systems to report READY_TO_START). On a fully connected
+        HIL the state may further advance to READY, but the minimum observable
+        transition is IDLE → CONFIGURED or better.
+        """
+        uri = request.config.WEB_HMI_URI
+
+        # Select the WDS
+        sel_resp = run_sync_in_thread(
+            _call_adaptio, uri, "select_weld_data_set",
+            timeout=DEFAULT_TIMEOUT, id=wds_id,
+        )
+        assert _get_result(sel_resp) == "ok", "Pre-condition: SelectWeldDataSet failed"
+
+        # Query the arc state
+        arc_resp = run_sync_in_thread(
+            _call_adaptio, uri, "get_arc_state",
+            timeout=DEFAULT_TIMEOUT,
+        )
+        logger.debug(f"GetArcState after select: {arc_resp}")
+
+        result = _get_result(arc_resp)
+        assert result == "ok", f"GetArcState returned '{result}'"
+
+        payload = _get_payload(arc_resp)
+        state = payload.get("state") if isinstance(payload, dict) else None
+        # After selecting a WDS the system must leave idle state
+        assert state != "idle", (
+            f"Expected arc state to be 'configured', 'ready', 'starting' or 'active' "
+            f"after SelectWeldDataSet, but got '{state}'"
+        )
+        logger.info(f"Arc state is '{state}' after SelectWeldDataSet — weld start sequence enabled")
+
+    def test_subscribe_arc_state(self, request, wds_id):
+        """SubscribeArcState should return a success acknowledgement."""
+        uri = request.config.WEB_HMI_URI
+
+        response = run_sync_in_thread(
+            _call_adaptio, uri, "subscribe_arc_state",
+            timeout=DEFAULT_TIMEOUT,
+        )
+        logger.debug(f"SubscribeArcState response: {response}")
+
+        result = _get_result(response)
+        assert result == "ok", f"Expected 'ok' but got '{result}'"
+        logger.info("SubscribeArcState succeeded")

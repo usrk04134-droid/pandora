@@ -428,10 +428,14 @@ class TestEnumClasses:
         assert MessageName.START_TRACKING.value == "StartTracking"
 
     def test_activity_status_enum_values(self):
-        """Test ActivityStatus enum has expected values."""
+        """Test ActivityStatus enum has expected values matching Gen2 ActivityStatusE."""
         assert ActivityStatus.IDLE.value == 0
-        assert ActivityStatus.TRACKING.value == 3
-        assert ActivityStatus.SERVICE_MODE_KINEMATICS.value == 5
+        assert ActivityStatus.LASER_TORCH_CALIBRATION.value == 1
+        assert ActivityStatus.WELD_OBJECT_CALIBRATION.value == 2
+        assert ActivityStatus.CALIBRATION_AUTO_MOVE.value == 3
+        assert ActivityStatus.TRACKING.value == 4
+        assert ActivityStatus.LW_CALIBRATION.value == 5
+        assert ActivityStatus.MANUAL_WELDING.value == 6
 
     def test_enum_uniqueness(self):
         """Test that enum values are unique."""
@@ -606,12 +610,16 @@ class TestAdaptioWebHmiApiMethods:
         mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
 
     def test_get_weld_process_parameters(self, mock_websocket_client_sync):
-        """Test getting weld process parameters list."""
+        """Test getting weld process parameters list.
+
+        Gen2 sends the WPP list as the payload array directly, matching:
+        {"name": "GetWeldProcessParametersRsp", "result": "ok", "payload": [...]}
+        """
         # Preparation
         request = AdaptioWebHmiMessage(name="GetWeldProcessParameters", payload={})
         response = AdaptioWebHmiMessage(
             name="GetWeldProcessParametersRsp",
-            payload={"result": "ok", "weldProcessParameters": [{"id": 1, "name": "WPP1"}]},
+            payload=[{"id": 1, "name": "WPP1"}],
         )
         mock_websocket_client_sync.receive_message.return_value = str(response)
 
@@ -677,12 +685,16 @@ class TestAdaptioWebHmiApiMethods:
         mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
 
     def test_get_weld_data_sets(self, mock_websocket_client_sync):
-        """Test getting weld data sets list."""
+        """Test getting weld data sets list.
+
+        Gen2 sends the WDS list as the payload array directly, matching:
+        {"name": "GetWeldDataSetsRsp", "result": "ok", "payload": [...]}
+        """
         # Preparation
         request = AdaptioWebHmiMessage(name="GetWeldDataSets", payload={})
         response = AdaptioWebHmiMessage(
             name="GetWeldDataSetsRsp",
-            payload={"result": "ok", "weldDataSets": [{"id": 1, "name": "WDS1", "ws1WppId": 1, "ws2WppId": 2}]},
+            payload=[{"id": 1, "name": "WDS1", "ws1WppId": 1, "ws2WppId": 2}],
         )
         mock_websocket_client_sync.receive_message.return_value = str(response)
 
@@ -730,6 +742,43 @@ class TestAdaptioWebHmiApiMethods:
         assert result.name == MessageName.REMOVE_WELD_DATA_SET_RSP.value
         assert result.payload == response.payload
         mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+
+    def test_subscribe_arc_state(self, mock_websocket_client_sync):
+        """Test subscribing to arc state notifications."""
+        # Preparation
+        request = AdaptioWebHmiMessage(name="SubscribeArcState", payload={})
+        response = AdaptioWebHmiMessage(name="SubscribeArcStateRsp", payload={"result": "ok"})
+        mock_websocket_client_sync.receive_message.return_value = str(response)
+
+        # Execution
+        client = AdaptioWebHmi(uri="ws://testserver")
+        result = client.subscribe_arc_state()
+
+        # Verification
+        assert result.name == MessageName.SUBSCRIBE_ARC_STATE_RSP.value
+        assert result.payload == response.payload
+        mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+        mock_websocket_client_sync.receive_message.assert_called_once()
+
+    def test_get_arc_state(self, mock_websocket_client_sync):
+        """Test getting current arc state."""
+        # Preparation
+        request = AdaptioWebHmiMessage(name="GetArcState", payload={})
+        response = AdaptioWebHmiMessage(
+            name="GetArcStateRsp",
+            payload={"result": "ok", "state": "idle"},
+        )
+        mock_websocket_client_sync.receive_message.return_value = str(response)
+
+        # Execution
+        client = AdaptioWebHmi(uri="ws://testserver")
+        result = client.get_arc_state()
+
+        # Verification
+        assert result.name == MessageName.GET_ARC_STATE_RSP.value
+        assert result.payload == response.payload
+        mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+        mock_websocket_client_sync.receive_message.assert_called_once()
 
     def test_get_joint_geometry(self, mock_websocket_client_sync):
         """Test getting joint geometry."""
