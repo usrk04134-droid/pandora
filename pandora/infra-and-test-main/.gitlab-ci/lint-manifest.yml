@@ -1,0 +1,38 @@
+# Template job for validating YAML manifests against JSON schemas
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'lint-manifest'
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '10 minutes'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+    schema-path:
+      description: 'The path to the JSON schema for validation purposes'
+      type: string
+    manifest-paths:
+      description: 'The paths to the YAML manifests that requires validation'
+      type: array
+
+---
+'$[[ inputs.job-name ]]':
+  image: registry.gitlab.com/esab/abw/infra-and-test/manifest_validator:0.1.0
+  stage: lint
+  tags:
+    - adaptio-k8-2
+  timeout: $[[ inputs.job-timeout ]]
+  rules: $[[ inputs.job-rules ]]
+  parallel:
+    matrix:
+      - MANIFEST_PATH: $[[ inputs.manifest-paths ]]
+  script:
+    - python /app/validate.py --schema $[[ inputs.schema-path ]] --manifest $MANIFEST_PATH

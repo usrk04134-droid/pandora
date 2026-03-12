@@ -1,0 +1,20 @@
+target_sources(${ADAPTIO_APPLICATION}
+    PRIVATE
+    enum_helpers.h
+    json_helpers.h
+)
+
+add_subdirectory(containers)
+add_subdirectory(data)
+add_subdirectory(deposition_simulator)
+add_subdirectory(file)
+add_subdirectory(filters)
+add_subdirectory(geometric_primitives)
+add_subdirectory(logging)
+add_subdirectory(math)
+add_subdirectory(groove)
+add_subdirectory(messages)
+add_subdirectory(storage)
+add_subdirectory(time)
+add_subdirectory(types)
+add_subdirectory(zevs)

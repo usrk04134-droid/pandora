@@ -1,0 +1,79 @@
+# Template job for updating a manifest version
+#
+# In addition to the inputs, this job requires the following variables to be available in the pipeline:
+# - SERVICE_ACCOUNT_PAT: The personal access token of the service account
+# - SERVICE_ACCOUNT_USER_NAME: The username of the service account
+# - SERVICE_ACCOUNT_EMAIL: The email of the service account
+#
+# This job is intended to be used in a child pipeline, and it has dependencies on the parent pipeline.
+# The following variables must be available as environment variables in the job.
+#
+# - PARENT_PROJECT_ID: The ID of the project where the parent pipeline is located.
+# - PARENT_JOB_ID: The ID of the job in the parent pipeline that contains the SW_VERSIONS_FILE.
+# - MANIFEST_ARTIFACT: The name of the updated manifest file in the parent pipeline.
+# - MANIFEST_PATH: The path to the manifest file that shall be updated.
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'update-manifest-versions'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CI_COMMIT_REF_PROTECTED == "true"'
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          when: never
+    job-stage:
+      description: 'The stage the job will run in'
+      type: string
+      default: 'deploy'
+    issue-id:
+      description: 'The issue ID to link the merge request to'
+      type: string
+      default: 'ADT-2527'
+---
+include:
+  - local: '/.gitlab-ci/variables.yml'
+  - local: '/.gitlab-ci/common.yml'
+  - local: '/.gitlab-ci/fetch-scripts.yml'
+
+.update-manifest: &update-manifest
+  - section_start update_manifest "Fetch updated manifest file from parent pipeline" true
+  - |
+    [[ -z "$PARENT_PROJECT_ID" ]] && log_error "Missing 'PARENT_PROJECT_ID'" && exit 1
+    [[ -z "$PARENT_JOB_ID" ]] && log_error "Missing 'PARENT_JOB_ID'" && exit 1
+    [[ -z "$MANIFEST_PATH" ]] && log_error "Missing 'inputs.manifest-path'" && exit 1
+    [[ -z "$MANIFEST_ARTIFACT" ]] && log_error "Missing 'MANIFEST_ARTIFACT'" && exit 1
+
+    # Download the updated manifest file from the parent pipeline and overwrite the existing one
+    curl -sS -X GET --location \
+      --header "PRIVATE-TOKEN: $SERVICE_ACCOUNT_PAT" \
+      --output "$MANIFEST_PATH" \
+      "${CI_API_V4_URL}/projects/${PARENT_PROJECT_ID}/jobs/${PARENT_JOB_ID}/artifacts/${MANIFEST_ARTIFACT}"
+
+    log_debug "$MANIFEST_PATH:" && cat $MANIFEST_PATH
+  - section_end update_manifest
+
+'$[[ inputs.job-name ]]':
+  stage: $[[ inputs.job-stage ]]
+  rules: $[[ inputs.job-rules ]]
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.0
+  tags: [smalls]
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - !reference [.git-setup, script]
+    - !reference [.fetch-scripts, script]
+  script:
+    - *update-manifest
+    - >
+      $SCRIPTS_DIR/create-and-merge-request.sh
+      --project-id ${CI_PROJECT_ID}
+      --token $SERVICE_ACCOUNT_PAT
+      --branch $CI_COMMIT_BRANCH
+      --all-tracked
+      --mr-title "chore: Update manifest versions"
+      --mr-branch-prefix "update-manifest-versions"
+      --jira-id "$[[ inputs.issue-id ]]"

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "testzilla"
+version = "0.3.2"
+description = "HIL test framework for the Adaptive Weld System project"
+authors = [{name = "Team Godzilla", email = "team-godzilla@esab.onmicrosoft.com"}]
+dependencies = ["fabric",
+    "loguru",
+    "pydantic",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "requests",
+    "websockets",
+    "playwright"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["testzilla*"]

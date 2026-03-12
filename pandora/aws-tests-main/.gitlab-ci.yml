@@ -1,0 +1,135 @@
+spec:
+  inputs:
+    hil-runner-tags:
+      description: 'Tags that will decide which HIL runner to use'
+      type: array
+      default:
+        - 'hil-gbg-01'
+    hil-test-when:
+      description: 'When to run the HIL test job'
+      type: string
+      default: 'manual'
+---
+variables:
+  SYSTEM_MANIFEST_VERSION:
+    value: ''
+    description: 'Update the test manifest with this version of the system manifest'
+
+include:
+  - local: '.gitlab-ci/stage-pipeline.yml'
+    rules:
+      - if: '$PIPELINE_ENV == "stage"'
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file:
+      - '/.gitlab-ci/lint-commit.yml'
+      - '/.gitlab-ci/lint-markdown-cli2.yml'
+      - '/.gitlab-ci/lint-nix.yml'
+      - '/.gitlab-ci/lint-shellscript.yml'
+      - '/.gitlab-ci/lint-python.yml'
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file: '/.gitlab-ci/lint-manifest.yml'
+    inputs:
+      job-rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          changes:
+            - 'test-manifest.yaml'
+            - 'schemas/test-manifest.schema.json'
+      schema-path: 'schemas/test-manifest.schema.json'
+      manifest-paths:
+        - 'test-manifest.yaml'
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file: '/.gitlab-ci/hil-test.yml'
+    inputs:
+      job-name: 'hil-tests:hil-chn'
+      image-name: 'registry.gitlab.com/esab/abw/infra-and-test/test-env:1.3.5'
+      job-tags: 
+        - 'hil-chn-01'
+      job-rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          changes:
+            - 'hil-tests/**/*'
+          when: $[[ inputs.hil-test-when ]]
+        - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_PROTECTED == "true"'
+          changes:
+            - 'test-manifest.yaml'
+          when: 'on_success'
+        - if: '$CI_PIPELINE_SOURCE == "web"'
+          when: $[[ inputs.hil-test-when ]]
+        - if: '$CI_PIPELINE_SOURCE == "schedule"'
+          when: 'on_success'
+      pytest-extra-args: >
+        --clean-logs
+        --collect-logs
+        --testrail
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file: '/.gitlab-ci/hil-test.yml'
+    inputs:
+      job-name: 'hil-tests:hil-gbg'
+      image-name: 'registry.gitlab.com/esab/abw/infra-and-test/test-env:1.3.5'
+      job-tags: $[[ inputs.hil-runner-tags ]]
+      job-rules:
+        # - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        #   changes:
+        #     - 'hil-tests/**/*'
+        #   when: $[[ inputs.hil-test-when ]]
+        - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_PROTECTED == "true"'
+          changes:
+            - 'test-manifest.yaml'
+          when: 'on_success'
+        - if: '$CI_PIPELINE_SOURCE == "web"'
+          when: $[[ inputs.hil-test-when ]]
+        - if: '$CI_PIPELINE_SOURCE == "schedule"'
+          when: 'on_success'
+      pytest-extra-args: >
+        --clean-logs
+        --collect-logs
+        --testrail
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file: '/.gitlab-ci/update-test-manifest.yml'
+    inputs:
+      system-manifest-version: $SYSTEM_MANIFEST_VERSION
+      job-rules:
+        - if: '$CI_PIPELINE_SOURCE == "pipeline"
+            && $SYSTEM_MANIFEST_VERSION
+            && $SYSTEM_MANIFEST_VERSION != ""
+            && $CI_COMMIT_REF_PROTECTED == "true"'
+        - if: '$CI_PIPELINE_SOURCE == "web"'
+          when: manual
+          allow_failure: true
+
+workflow:
+  name: '$PIPELINE_NAME'
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    - if: '$PIPELINE_ENV == "stage"'
+      variables:
+        PIPELINE_NAME: 'Triggered validation: $TEMPLATE_TRIGGERED_FROM'
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      variables:
+        PIPELINE_NAME: 'MR pipeline: $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME'
+    - if: '$CI_PIPELINE_SOURCE == "pipeline"'
+      variables:
+        PIPELINE_NAME: 'Triggered by pipeline for branch: $CI_COMMIT_REF_NAME'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      variables:
+        PIPELINE_NAME: 'Triggered by web for branch: $CI_COMMIT_REF_NAME'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      variables:
+        PIPELINE_NAME: 'Nightly HiL Test: $CI_COMMIT_REF_NAME'
+
+stages:
+  - lint
+  - configuration
+  - test

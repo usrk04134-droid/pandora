@@ -1,0 +1,16 @@
+keys:
+  - hosts:
+      - &hil-gbg-01 age158a2jnv2zseas5er08dej73g3v8sdfmwqe23gkc023cm7wqahq5s4a7tcn
+      - &hil-gbg-02 age1hek532rp3uaweurv860j40suyyxcqle23ctkhkyaun7m37a3aszswxyurj
+      - &hil-chn-01 age1fg7pwd0q0yjfg75y85eyyp09et3nlqv7uedynqv7estkyqmcyvxq0m2tlm
+creation_rules:
+  - path_regex: secrets.yaml$
+    key_groups:
+      - age:
+          - *hil-gbg-01
+          - *hil-gbg-02
+          - *hil-chn-01
+        azure_keyvault:
+          - vaultUrl: 'https://kv-adaptio-test-rpp.vault.azure.net'
+            key: 'sops-master-key'
+            version: 4c8d000c98f1454091003c319b4dffbb

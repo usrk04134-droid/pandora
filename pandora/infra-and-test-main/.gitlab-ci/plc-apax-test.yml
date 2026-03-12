@@ -1,0 +1,56 @@
+# Template job for performing apax test.
+#
+# Note! This job depends on files located in the aws-platform repository.
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'apax-test'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+    image-version:
+      description: 'The version of the image to use'
+      type: string
+    login-token:
+      description: 'The token to use for apax login'
+      type: string
+---
+'$[[ inputs.job-name ]]':
+  rules: $[[ inputs.job-rules ]]
+  stage: test
+  image: registry.gitlab.com/esab/abw/plc/aws-platform/aws-platform-env:$[[ inputs.image-version ]]
+  tags:
+    - adaptio-k8-2
+  allow_failure: true
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+  script:
+    - section_start apax_login "apax login" true
+    - apax login -p $[[ inputs.login-token ]]
+    - section_end apax_login
+    - section_start apax_install "apax install" true
+    - apax install --copy-local
+    - section_end apax_install
+    - section_start apax_apply_base_config
+    - apax apply-configuration-layers
+    - section_end apax_apply_base_config
+    - section_start apax_test "Run tests"
+    - |
+      apax_test_exit_code=0
+      apax test || apax_test_exit_code=$?
+    - section_end apax_test
+    - section_start create_junit_report "Create Junit test report from AxUnit test report"
+    - axunit2junit --axunit-report-path ${CI_PROJECT_DIR}/bin/axunit-artifacts/test-results/TestResult.xml --junit-report-name junit-report.xml
+    - section_end create_junit_report
+    - exit $apax_test_exit_code
+  artifacts:
+    when: always
+    expire_in: 2 weeks
+    reports:
+      junit: ${CI_PROJECT_DIR}/bin/axunit-artifacts/test-results/junit-report.xml

@@ -1,0 +1,38 @@
+# Template job for Nix based build of default or specified target attribute.
+
+spec:
+  inputs:
+    job-name:
+      description: 'Name of the job'
+      type: string
+      default: 'check-nix'
+    job-rules:
+      description: 'Rules for the job'
+      type: array
+      default:
+        - when: on_success
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '90 minutes'
+    verbose:
+      description: 'If set verbose build output enabled'
+      type: boolean
+      default: false
+
+---
+include:
+  - local: '/.gitlab-ci/k8-runner-defaults.yml'
+
+'$[[ inputs.job-name ]]':
+  extends: .k8-adaptio-defaults
+  stage: check
+  rules: $[[ inputs.job-rules ]]
+  timeout: $[[ inputs.job-timeout ]]
+  script:
+    - VERBOSE=""
+    - if $[[ inputs.verbose ]]; then VERBOSE="-vv"; fi
+    - source $GITLAB_SHARED_FUNCS
+    - section_start flake_check "Check-Nix; evaluate flake, build and run tests" true
+    - nix flake check $VERBOSE
+    - section_end flake_check

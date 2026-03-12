@@ -1,0 +1,26 @@
+[general]
+regex-style-search=true
+verbosity = 3
+fail-without-commits = true
+contrib = CT1, ESAB1, ESAB2, ESAB3, ESAB4
+
+[title-max-length]
+line-length = 50
+
+[title-min-length]
+min-length = 5
+
+[title-must-not-contain-word]
+words = wip,draft
+
+[body-max-line-length]
+line-length = 72
+
+[body-min-length]
+min-length = 12
+
+[body-is-missing]
+ignore-merge-commits = true
+
+#[author-valid-email]
+#regex = \b[A-Za-z0-9._%+-]+@esab\.[A-Za-z0-9.-]+\b

@@ -1,0 +1,82 @@
+# Template job for building and pushing a container image using Podman.
+# Requires that the image is built using Nix from a flake that sets the tag field
+# to something that can be used as a version tag in the container registry.
+#
+# IMG_NAME is the name to use for the image in the container registry.
+# IMG_FILES is the path to the directory where the flake.nix file is located. If no path is specified, the current directory is used.
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'build-and-push-flake'
+    job-matrix:
+      description: 'The matrix of images to build'
+      type: array
+      default:
+        - IMG_NAME: ''
+          IMG_FILES: ''
+    job-rules:
+      description: 'The list of rules: for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          changes:
+            - flake.{nix,lock}
+    nix-attribute:
+      description: 'The nix target attribute to build'
+      type: string
+      default: .#containerImage
+---
+include:
+  - local: /.gitlab-ci/variables.yml
+  - local: /.gitlab-ci/common.yml
+  - local: /.gitlab-ci/k8-runner-defaults.yml
+
+'$[[ inputs.job-name ]]':
+  variables:
+    SYSTEM_FEATURES: kvm
+  extends: .k8-adaptio-defaults
+  stage: build
+  image: registry.gitlab.com/esab/abw/infra-and-test/podman:1.0.2
+  parallel:
+    matrix: $[[ inputs.job-matrix ]]
+  rules: $[[ inputs.job-rules ]]
+  before_script:
+    - !reference [.k8-nix-defaults, before_script]
+    - |
+      if [[ -z "$IMG_NAME" ]]; then
+        echo -e "${BOLD}${RED}$(date "+%Y-%m-%d %T") - Missing IMAGE_NAME!${RESET}"
+        exit 1
+      fi
+
+      if [[ -n "$IMG_FILES" ]]; then
+        cd $IMG_FILES
+      fi
+
+      if [[ "$CI_COMMIT_REF_PROTECTED" != "true" ]]; then
+        VERSION_SUFFIX="-${CI_COMMIT_SHORT_SHA}"
+      else
+        VERSION_SUFFIX=""
+      fi
+  script:
+    - nix build $[[ inputs.nix-attribute ]] --print-out-paths --log-format bar-with-logs --verbose
+    - PODMAN_OUTPUT=$(podman image load --input result)
+    - PODMAN_NAME_AND_TAG=$(echo $PODMAN_OUTPUT | grep "Loaded image" | sed "s/Loaded image. //")
+    - VERSION=$(podman images --format="{{.Tag}}" $PODMAN_NAME_AND_TAG)
+    - NAME_AND_TAG="${IMG_NAME}:${VERSION}${VERSION_SUFFIX}"
+    - podman images
+    - |
+      echo "Verify that image $NAME_AND_TAG doesn't exist yet."
+
+      TAG_EXISTS=$(curl -s --header "JOB-TOKEN: $CI_JOB_TOKEN" "${CI_API_V4_URL}/projects/$CI_PROJECT_ID/registry/repositories?tags=true" \
+        | jq -r --arg name "$IMG_NAME" --arg tag "$VERSION" '.[] | select(.name == $name) | .tags[] | select(.name == $tag) | .name')
+
+      if [[ -n "$TAG_EXISTS" ]]; then
+        echo -e "${BOLD}${RED}$(date "+%Y-%m-%d %T") - Version $VERSION already exists for image $IMG_NAME. Did you forget to bump the version?${RESET}"
+        exit 1
+      fi
+      echo -e "${GREEN}$(date "+%Y-%m-%d %T") - Version $VERSION is new!${RESET}"
+    - echo "$CI_JOB_TOKEN" | podman login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
+    - podman push $PODMAN_NAME_AND_TAG "docker://$CI_REGISTRY_IMAGE/${NAME_AND_TAG}"

@@ -1,0 +1,92 @@
+# Template job for linting Python files using ruff
+#
+# Note! If 'config-path' is set to an empty string, ruff will search for the "closest" config file.
+#       If no config is found, it will use the tool defaults.
+#
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'lint-python'
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '10 minutes'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+          changes:
+            - '**/*.py'
+    config-path:
+      description: 'The path to the ruff configuration file'
+      type: string
+      default: '/etc/opt/ruff.toml'
+
+---
+'$[[ inputs.job-name ]]':
+  image: registry.gitlab.com/esab/abw/infra-and-test/ruff:0.4.1
+  stage: lint
+  tags:
+    - smalls
+  timeout: $[[ inputs.job-timeout ]]
+  rules: $[[ inputs.job-rules ]]
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+  script:
+    - |
+      section_start main "Lint Python files"
+
+      if [ -n "$[[ inputs.config-path ]]" ]; then
+        CONFIG_ARG="--config $[[ inputs.config-path ]]"
+        log_info "Using ruff config file: $[[ inputs.config-path ]]"
+        cat $[[ inputs.config-path ]]
+      else
+        CONFIG_ARG=""
+        log_info "No config file specified. Using default ruff config"
+      fi
+
+      section_start find_files "Find Python files that has been changed"
+      python_files=$(git diff --name-status "$CI_MERGE_REQUEST_DIFF_BASE_SHA" "$CI_COMMIT_SHA" | awk '
+        /\.py$/ {
+          # For renamed files (R), use the new filename (field 3)
+          if ($1 ~ /^R/) {
+            print $3
+          }
+          # For added/modified files, use the filename (field 2)
+          else if ($1 ~ /^[AM]/) {
+            print $2
+          }
+          # Skip deleted files (D)
+        }
+      ' | while read file; do
+        # Only include files that actually exist
+        [ -f "$file" ] && echo "$file"
+      done)
+
+      if [ -z "$python_files" ]; then
+        log_info "No Python files has been changed"
+        exit 0
+      fi
+
+      log_info "Python files changed:\n$python_files"
+      section_end find_files
+
+      section_start ruff_settings "See the settings Ruff will use" true
+      ruff check ${CONFIG_ARG} --show-settings
+      section_end ruff_settings
+
+      section_start ruff_check "Run ruff check on Python files"
+      log_info "Linting Python files:\n$python_files"
+      ruff check ${python_files} ${CONFIG_ARG} --output-format gitlab | tee result.json
+      section_end ruff_check
+
+      section_end main
+  artifacts:
+    reports:
+      codequality: result.json
+    paths:
+      - result.json

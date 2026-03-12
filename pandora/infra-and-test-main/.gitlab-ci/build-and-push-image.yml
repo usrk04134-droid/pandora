@@ -1,0 +1,98 @@
+# Template job for building and pushing a container image using Podman.
+#
+# IMG_NAME is the name to use for the image in the container registry.
+# IMG_FILES is the path to the directory where the Docker file is located. If no path is specified, the current directory is used.
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'build-and-push-image'
+    job-matrix:
+      description: 'The matrix of images to build'
+      type: array
+      default:
+        - IMG_NAME: ''
+          IMG_FILES: '.'
+          BUILD_ARGS: ''
+          ENABLE_SECRET_ARGS: 'false'
+    job-rules:
+      description: 'The list of rules: for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+          changes:
+            # Exclude .md files (ruby fnmatch glob)
+            # [^d] - any char except 'd'
+            # [^m]d - any char except 'm' followed by 'd'
+            # [^.]md - any char except '.' followed by 'md'
+            - $IMG_FILES/**/*{[^d],[^m]d,[^.]md}
+        - if: '$CI_COMMIT_REF_PROTECTED == "true"'
+          changes:
+            # Exclude .md files (ruby fnmatch glob)
+            - $IMG_FILES/**/*{[^d],[^m]d,[^.]md}
+
+---
+'$[[ inputs.job-name ]]':
+  tags:
+    - saas-linux-medium-amd64
+  stage: build
+  image: registry.gitlab.com/esab/abw/infra-and-test/podman:1.0.2
+  parallel:
+    matrix: $[[ inputs.job-matrix ]]
+  rules: $[[ inputs.job-rules ]]
+  before_script:
+    - |
+      if [[ -z "$IMG_NAME" ]]; then
+        echo -e "${BOLD}${RED}$(date "+%Y-%m-%d %T") - Missing IMAGE_NAME!${RESET}"
+        exit 1
+      fi
+
+      cd $IMG_FILES
+
+      if [[ "$CI_COMMIT_REF_PROTECTED" != "true" ]]; then
+        VERSION_SUFFIX="-${CI_COMMIT_SHORT_SHA}"
+      else
+        VERSION_SUFFIX=""
+      fi
+  script:
+    - |
+      VERSION="$(grep 'LABEL version=' Dockerfile | sed 's/.*version="\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/')"
+
+      if echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+        echo -e "${BOLD}${GREEN}$(date "+%Y-%m-%d %T") - Valid version found: $VERSION${RESET}"
+      else
+        echo -e "${BOLD}${RED}$(date "+%Y-%m-%d %T") - Invalid version format or no version found in the Dockerfile!${RESET}"
+        exit 1
+      fi
+
+      VERSION_AND_SUFFIX="${VERSION}${VERSION_SUFFIX}"
+
+      TAG_EXISTS=$(curl -s --header "JOB-TOKEN: $CI_JOB_TOKEN" "${CI_API_V4_URL}/projects/$CI_PROJECT_ID/registry/repositories?tags=true" \
+        | jq -r --arg name "$IMG_NAME" --arg tag "$VERSION" '.[] | select(.name == $name) | .tags[] | select(.name == $tag) | .name')
+
+      if [ -n "$TAG_EXISTS" ]; then
+        echo -e "${BOLD}${RED}$(date "+%Y-%m-%d %T") - Version $VERSION already exists for image $IMG_NAME. Did you forget to bump the version label in the Dockerfile?${RESET}"
+        exit 1
+      fi
+    - |
+      SECRET_ARGS=""
+      if [[ "$ENABLE_SECRET_ARGS" == "true" ]]; then
+        echo -n "$CI_JOB_TOKEN" > gitlab_token
+        echo -n "$CI_PROJECT_ID" > gitlab_project_id
+
+        SECRET_ARGS="$SECRET_ARGS --secret id=gitlab_token,src=gitlab_token --secret id=gitlab_project_id,src=gitlab_project_id"
+      fi
+    - NAME_AND_TAG="${IMG_NAME}:${VERSION_AND_SUFFIX}"
+    - echo "NAME_AND_TAG=${NAME_AND_TAG}" >> build.env
+    - TAG_OR_MANIFEST=${PLATFORM:+ --manifest}; TAG_OR_MANIFEST=${TAG_OR_MANIFEST:- --tag}
+    - echo "$CI_JOB_TOKEN" | podman login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - podman build --format docker ${PLATFORM:+ --platform} $PLATFORM $TAG_OR_MANIFEST "$NAME_AND_TAG" $SECRET_ARGS .
+    - podman ${PLATFORM:+ manifest} push "$NAME_AND_TAG" "docker://$CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+  artifacts:
+    paths:
+      - $IMG_FILES/build.env
+    reports:
+      dotenv: $IMG_FILES/build.env

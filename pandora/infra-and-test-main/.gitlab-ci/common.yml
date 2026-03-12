@@ -1,0 +1,16 @@
+# In this file we define common script snippets that can be reused in pipeline jobs.
+# If this file has been included, the snippets can be referenced by name and script.
+# E.g., !reference [.git-setup, script]
+
+.git-setup:
+  script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start git_setup "Setup Git" true
+    - git config --global credential.helper store
+    - echo "https://oauth2:${SERVICE_ACCOUNT_PAT}@gitlab.com" > ~/.git-credentials
+    - CI_PUSH_REPO="https://${CI_REPOSITORY_URL##*@}"
+    - git config user.name "${SERVICE_ACCOUNT_USER_NAME}"
+    - git config user.email "${SERVICE_ACCOUNT_EMAIL}"
+    - git remote set-url --push origin ${CI_PUSH_REPO}
+    - git checkout ${CI_COMMIT_BRANCH}
+    - section_end git_setup

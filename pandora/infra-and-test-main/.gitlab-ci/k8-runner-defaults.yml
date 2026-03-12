@@ -1,0 +1,47 @@
+spec:
+  inputs:
+    post-build-hook:
+      description: 'If true, the post-build hook will be executed'
+      type: string
+      default: 'true'
+    job-name-suffix:
+      description: 'Add this part to the end of the job name'
+      type: string
+      default: 'defaults'
+    system-features:
+      description: 'Add system features to the nix.conf'
+      type: string
+      default: ''
+---
+include:
+  - local: /.gitlab-ci/variables.yml
+
+# NOTE: The local definitions takes precendence
+# E.g. if a local before_script is defined it would take precendence over this definition.
+# In that case use a gitlab reference like: !reference [.k8-adaptio-defaults, before_script]
+.k8-nix-defaults:
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start nix_cache_preparations "K8 based nix cache preparations in nix.conf" true
+    - |
+      cat >> /etc/nix/nix.conf << EOF
+      extra-substituters = $NIX_CACHE_URL
+      extra-trusted-public-keys = $NIX_CACHE_PUB_KEY
+      secret-key-files = $NIX_CACHE_SIGNING_KEY_FILE
+      system-features = ${SYSTEM_FEATURES:-$[[ inputs.system-features ]]}
+      EOF
+
+      if [[ "$POST_BUILD_HOOK" == "true" ]]; then
+        echo "post-build-hook = $NIX_CACHE_BUILD_HOOK_FILE" >> /etc/nix/nix.conf
+        chmod +x $NIX_CACHE_BUILD_HOOK_FILE
+      fi
+    - section_end nix_cache_preparations
+
+'.k8-adaptio-$[[ inputs.job-name-suffix ]]':
+  image: registry.gitlab.com/esab/abw/infra-and-test/adaptio-ci:1.0.7
+  tags:
+    - adaptio-k8-2
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - POST_BUILD_HOOK=$[[ inputs.post-build-hook ]]
+    - !reference [.k8-nix-defaults, before_script]

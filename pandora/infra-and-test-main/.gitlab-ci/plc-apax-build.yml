@@ -1,0 +1,59 @@
+# Template job for performing apax build on PLC configurations.
+#
+# Note! This job depends on files located in the aws-platform repository.
+#
+# PLC_CONFIG is the name of the PLC configuration to build.
+# If PLC_CONFIG is not set, the job will build a minimal base system configuration.
+# This can be achieved by setting PLC_CONFIG to an empty string.
+#
+# The job will run in parallel for each PLC configuration in the matrix.
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'apax-build'
+    job-matrix:
+      description: 'The matrix of PLC configurations to build'
+      type: array
+      default:
+        - PLC_CONFIG: ''
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+    image-version:
+      description: 'The version of the image to use'
+      type: string
+    login-token:
+      description: 'The token to use for apax login'
+      type: string
+---
+'$[[ inputs.job-name ]]':
+  rules: $[[ inputs.job-rules ]]
+  stage: build
+  image: registry.gitlab.com/esab/abw/plc/aws-platform/aws-platform-env:$[[ inputs.image-version ]]
+  tags:
+    - adaptio-k8-2
+  parallel:
+    matrix: $[[ inputs.job-matrix ]]
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+  script:
+    - section_start apax_login "apax login" true
+    - apax login -p $[[ inputs.login-token ]]
+    - section_end apax_login
+    - section_start apax_install "apax install" true
+    - apax install --copy-local
+    - section_end apax_install
+    - section_start apax_build "apax build"
+    - |
+      if [[ -n "$PLC_CONFIG" ]]; then
+        apax build-with-config $PLC_CONFIG
+      else
+        apax build
+      fi
+    - section_end apax_build

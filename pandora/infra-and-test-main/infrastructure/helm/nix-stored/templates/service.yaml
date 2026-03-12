@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nix-stored.fullname" . }}
+  labels:
+    {{- include "nix-stored.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: nix-cache
+      protocol: TCP
+      name: {{ include "nix-stored.fullname" . -}}-port
+  selector:
+    {{- include "nix-stored.selectorLabels" . | nindent 4 }}

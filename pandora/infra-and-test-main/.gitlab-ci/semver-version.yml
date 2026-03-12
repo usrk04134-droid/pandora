@@ -1,0 +1,159 @@
+# This template is used to automatically version SW projects by analyzing commit
+# messages and updating a version file with the appropriate SemVer version.
+# It will also tag the version file commit with the same version.
+#
+# The template contains two jobs, one that runs in merge request pipelines for
+# protected branches and one job that runs for commits to protected branches.
+#
+# In the jobs we use a Python application called "tagger" to analyze commit
+# messages and to create git tags. Tagger is part of the tagger image, and the
+# source can be found under ../container_files/tagger.
+#
+# The jobs are running in the .pre stage and there are two reasons for this.
+# 1. The .pre stage is a pre-defined stage in GitLab, and it allows us to not
+#    depend on a specific stage being defined in the pipeline that includes this
+#    template.
+# 2. The .pre stage will always run first in a pipeline, which is what we want
+#    for these jobs. We want the new version to be available when we get to the
+#    build stage.
+#
+# REQUIREMENT: To use this template a pipeline must contain other jobs outside
+# the .pre stage. A pipeline that only contains jobs in a .pre stage will not run.
+
+include:
+  - local: /.gitlab-ci/variables.yml
+  - local: /.gitlab-ci/common.yml
+
+variables:
+  TAGGER_IMG_VERSION: '1.1.0'
+  ISSUE_ID: 'ADT-2527'
+
+.semver-artifacts:
+  artifacts:
+    when: always
+    expire_in: 72h
+    reports:
+      dotenv: tagger.env
+    paths:
+      - 'logs/*'
+
+# CI_COMMIT_BRANCH is only available in branch pipelines, i.e. not in merge-request or tag pipelines.
+# CI_MERGE_REQUEST_TARGET_BRANCH_NAME is only available in merge-request pipelines.
+.tagger-analyze:
+  script:
+    - |
+      TAGGER_BASE_COMMAND="tagger analyze"
+      TAGGER_OPTIONS="--dotenv"
+
+      if [ -n "$CI_COMMIT_BRANCH" ]; then
+          TAGGER_BASE_COMMAND="$TAGGER_BASE_COMMAND merge-commit $CI_COMMIT_SHA"
+          case "$CI_COMMIT_BRANCH" in
+              main)
+                  :
+                  ;;
+              release/*)
+                  TAGGER_OPTIONS="$TAGGER_OPTIONS --pre-release"
+                  ;;
+              *)
+                  log_error "SemVer version bumping is only allowed on 'main' or 'release/*' branches!"
+                  exit 1
+                  ;;
+          esac
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
+          TAGGER_BASE_COMMAND="$TAGGER_BASE_COMMAND merge-request $CI_COMMIT_SHA"
+          case "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" in
+              main)
+                  :
+                  ;;
+              release/*)
+                  TAGGER_OPTIONS="$TAGGER_OPTIONS --pre-release"
+                  ;;
+              *)
+                  log_error "SemVer version bumping is only allowed on 'main' or 'release/*' branches!"
+                  exit 1
+                  ;;
+          esac
+      else
+          log_error "No branch or merge request target branch found!"
+          exit 1
+      fi
+
+      TAGGER_FULL_COMMAND="$TAGGER_BASE_COMMAND $TAGGER_OPTIONS"
+      log_debug "Executing command: ${TAGGER_FULL_COMMAND}"
+      $TAGGER_FULL_COMMAND
+      source tagger.env
+
+# This job only runs in merge request pipelines where the target branch is protected.
+# In case of a breaking change the job will notify the author that the MR will
+# cause a new major version if merged. It does this by creating a note in the MR.
+# For all other cases it just logs what will happen.
+semver-merge-request:
+  rules:
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_PROTECTED == "true"'
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:$TAGGER_IMG_VERSION
+  tags: [smalls]
+  stage: .pre
+  extends: .semver-artifacts
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start tagger "Analyze commit(s) to decide if a new version is needed" true
+    - !reference [.tagger-analyze, script]
+    - |
+      if [[ -n "$SEMVER_VERSION" && "$SEMVER_BUMP" == "MAJOR" ]]; then
+        log_info "Breaking change found!"
+        tagger add note "$CI_MERGE_REQUEST_IID" ":warning: **ATTENTION** :warning:<br><br>This MR contains breaking changes and will result in a new major version if merged"
+      fi
+
+      if [[ -n "$SEMVER_VERSION" && -n "$SEMVER_BUMP" ]]; then
+        log_info "This MR will result in version '${SEMVER_VERSION}' on '${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}', assuming no prior merges. A rebase may affect the version."
+      fi
+    - section_end tagger
+
+# This job only runs for new commits on protected branches where the commit message
+# doesn't match the regexp in the rule. If a new version is required by the changes
+# contained within the commit, this job will push a new commit with an updated
+# version file and tag that commit with the new version.
+semver-merge-commit:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"
+        && $CI_COMMIT_TAG == null
+        && $CI_COMMIT_REF_PROTECTED == "true"
+        && $CI_COMMIT_TITLE !~ /^chore\(semver\): Bump.*/' # Note! If the version file commit message is changed it might affect this rule!
+    - when: never
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:$TAGGER_IMG_VERSION
+  tags: [smalls]
+  stage: .pre
+  extends: .semver-artifacts
+  variables:
+    GIT_DEPTH: 0
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - !reference [.git-setup, script]
+  script:
+    - section_start analyze_commit "Analyze commit(s) to decide if a new version is needed" true
+    - !reference [.tagger-analyze, script]
+    - section_end analyze_commit
+    - section_start commit_and_tag "Commit and tag new version" true
+    - |
+      if [[ -n "$SEMVER_BUMP" && -n "$SEMVER_VERSION" ]]; then
+        if [[ -f version.txt ]]; then
+          current_version=$(tr -d '\n' < version.txt)
+        else
+          current_version=""
+        fi
+
+        if [[ "$current_version" != "${SEMVER_VERSION}" ]]; then
+          log_info "Update the version file with ${SEMVER_VERSION}"
+          echo "${SEMVER_VERSION}" > version.txt
+          git add version.txt
+          git commit -m "chore(semver): Bump $SEMVER_BUMP version to $SEMVER_VERSION" -m "Issues: ${ISSUE_ID}"
+          git push origin ${CI_COMMIT_BRANCH}
+          log_info "Add new version tag: ${SEMVER_VERSION}"
+          tagger add tag $(git rev-parse HEAD) ${SEMVER_VERSION} "Bump ${SEMVER_BUMP} version"
+        else
+          log_warn "version.txt already contains ${SEMVER_VERSION}, no update needed!"
+        fi
+      fi
+    - section_end commit_and_tag

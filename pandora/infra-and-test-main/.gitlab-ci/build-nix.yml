@@ -1,0 +1,178 @@
+# Template job for Nix based build of default or specified target attribute.
+
+spec:
+  inputs:
+    tags:
+      description: 'The runner selection tags'
+      type: array
+      default:
+        - adaptio-k8-2
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'build-nix'
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '90 minutes'
+    job-artifacts-paths:
+      description: 'The list of artifacts:paths: for the job'
+      type: array
+      default:
+        - result/
+    job-rules:
+      description: 'The list of rules: for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+        - if: '$CI_PIPELINE_SOURCE == "trigger"'
+    nix-attribute:
+      description: 'The nix target attribute to build'
+      type: string
+      default: .#
+    publish-artifact-name:
+      description: 'The name of the artifact in package registry'
+      type: string
+      default: ''
+    publish-artifact-path:
+      description: 'The path of the artifact to publish to package registry'
+      type: string
+      default: ''
+    publish-artifact-version:
+      description: 'The version of the artifact in package registry (defaults to `git describe`)'
+      type: string
+      default: ''
+    post-build-hook:
+      description: 'If true, the post-build hook will be executed'
+      type: string
+      default: 'true'
+    verbose:
+      description: 'If set verbose build output enabled'
+      type: boolean
+      default: false
+
+---
+include:
+  - local: '/.gitlab-ci/k8-runner-defaults.yml'
+    inputs:
+      post-build-hook: $[[ inputs.post-build-hook ]]
+      job-name-suffix: $[[ inputs.job-name ]]
+
+'$[[ inputs.job-name ]]':
+  extends: '.k8-adaptio-$[[ inputs.job-name ]]'
+  tags: $[[ inputs.tags ]]
+  stage: build
+  timeout: $[[ inputs.job-timeout ]]
+  artifacts:
+    paths: $[[ inputs.job-artifacts-paths ]]
+  rules: $[[ inputs.job-rules ]]
+  script:
+    - VERBOSE=""
+    - if $[[ inputs.verbose ]]; then VERBOSE="--verbose"; fi
+
+    - source $GITLAB_SHARED_FUNCS
+
+    - section_start fetch_cache "Build-Nix; fetch nix dependencies" true
+    # Fetch from cache separately from building, to get individual timing measurements for each
+    - section_start dry_run "Build-Nix; dry-run" true
+    - nix build $[[ inputs.nix-attribute ]] --dry-run --debug
+    - section_end dry_run
+    # Set remote and local builders to 0 to force build step to fail / be skipped
+    - >
+      nix build $[[ inputs.nix-attribute ]]
+      --print-out-paths
+      --log-format bar-with-logs
+      $VERBOSE
+      --option max-jobs 0
+      --option builders ''
+      || true
+    - echo 'The error "Unable to start any build; ..." above is expected and OK!'
+    - section_end fetch_cache
+
+    - section_start build "Build-Nix; build"
+    - >
+      nix build $[[ inputs.nix-attribute ]]
+      --print-out-paths
+      --log-format bar-with-logs
+      $VERBOSE
+    - section_end build
+    # Needed as walk in go don't follow symlinks and thus not GitLab
+    # See: https://gitlab.com/gitlab-org/gitlab/-/issues/19746
+    - section_start unsymlink "Build-Nix; copy files to local dir for GitLab" true
+    - mv result result_
+    - cp --archive --recursive result_/ result
+    - section_end unsymlink
+
+    # Optionally support to publish to package registry in job when the MR is
+    # merged to default branch.
+    # Limits: 1GB for artifacts & 5GB for packages on gitlab.com.
+    # See: https://docs.gitlab.com/ee/user/gitlab_com/index.html#gitlab-cicd
+    #
+    # Wildcard patterns are supported in the publish-artifact-path, but use with caution.
+    - |
+      if [[ "$CI_COMMIT_REF_PROTECTED" == "true" ]]; then
+        if [[ -n "$[[ inputs.publish-artifact-name ]]" ]]; then
+          section_start create_package "Publish to package registry" true
+
+          # Hacky way to sanitize / not have to urlencode
+          PUBLISH_NAME=$(echo -n $[[ inputs.publish-artifact-name ]] | tr -C "[-_.,~:;][:alnum:]" "-")
+
+          if [[ -z "$[[ inputs.publish-artifact-path ]]" ]]; then
+            echo "Error: missing publish-artifact-path"
+            exit 1
+          else
+            if [[ -z "$[[ inputs.publish-artifact-version ]]" ]]; then
+              PUBLISH_VERSION=$(git describe --always)
+            else
+              PUBLISH_VERSION="$[[ inputs.publish-artifact-version ]]"
+            fi
+
+            # Hacky way to sanitize / not have to urlencode
+            PUBLISH_VERSION=$(echo -n $PUBLISH_VERSION | tr -C "[-_.,~:;][:alnum:]" "-")
+
+            ARTIFACT_PATH="$[[ inputs.publish-artifact-path ]]"
+
+            if [[ "$ARTIFACT_PATH" == *"*"* ]]; then
+              echo "Found glob in publish-artifact-path"
+
+              # Use find to count matching files and store them in an array
+              # Using null-terminated output to handle special characters in filenames
+              readarray -d $'\0' files < <(find . -path "./$ARTIFACT_PATH" -print0)
+
+              if [ ${#files[@]} -eq 1 ]; then
+                PUBLISH_PATH="${files[0]}"
+              elif [ ${#files[@]} -gt 1 ]; then
+                echo "Pattern resulted in multiple files, archiving before publish..."
+                CURRENT_DATE=$(date +'%Y-%m-%d-%H-%M-%S')
+                PUBLISH_PATH="$PUBLISH_NAME-${PUBLISH_VERSION}-${CI_COMMIT_SHORT_SHA}-${CURRENT_DATE}.tar.xz"
+
+                if ! find . -path "./$ARTIFACT_PATH" -print0 | \
+                  tar --create --xz \
+                      --verbose \
+                      --file="$PUBLISH_PATH" \
+                      --null \
+                      --files-from - \
+                      --dereference
+                then
+                  echo "Error: Failed to create archive"
+                  exit 1
+                fi
+              else
+                echo "Error: No files found matching pattern"
+                exit 1
+              fi
+            else
+                PUBLISH_PATH="$ARTIFACT_PATH"
+            fi
+          fi
+
+          # Hacky way to sanitize / not have to urlencode
+          PUBLISH_FILE=$(basename ${PUBLISH_PATH} | tr -d '\n' | tr -C "[-_.,~:;][:alnum:]" "-")
+
+          PACKAGE_REGISTRY_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PUBLISH_NAME}/${PUBLISH_VERSION}/${PUBLISH_FILE}"
+          echo "Pushing to registry: $PACKAGE_REGISTRY_URL"
+          curl --fail-with-body --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$PUBLISH_PATH" "$PACKAGE_REGISTRY_URL"
+          section_end create_package
+        fi
+      fi

@@ -1,0 +1,72 @@
+# This job will always trigger on a change to any .md file in the project.
+
+spec:
+  inputs:
+    job-rules:
+      description: 'The list of rules: for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+          changes:
+            - '**/*.md'
+    use-config:
+      description: 'Path to a local markdownlint-cli2 config file'
+      type: string
+      default: ''
+    exclude-paths:
+      description: 'List of directories or files to exclude from the search'
+      type: array
+      default: []
+---
+lint-markdown-cli2:
+  tags:
+    - smalls
+  stage: lint
+  image: registry.gitlab.com/esab/abw/infra-and-test/markdownlint_cli2:0.2.3
+  variables:
+    EXCLUDE_PATHS: ''
+  rules: $[[ inputs.job-rules ]]
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+  script:
+    - section_start lint_markdown "Lint Markdown files"
+    - |
+      # Check if a custom config file is provided
+      [[ -n "$[[ inputs.use-config ]]" ]] && MDLINT_CONFIG="$[[ inputs.use-config ]]"
+
+      raw_exclude="$[[ inputs.exclude-paths ]]"
+
+      # Remove square brackets
+      cleaned="${raw_exclude#[}"
+      cleaned="${cleaned%]}"
+
+      # Split on commas
+      IFS=',' read -r -a exclude_array <<< "$cleaned"
+
+      # Base glob pattern for Markdown files
+      patterns=( "**/*.md" )
+
+      for path in "${exclude_array[@]}"; do
+        # Trim spaces
+        path=$(echo "$path" | xargs)
+        patterns+=( "!$path" )
+      done
+
+      log_info "Running: markdownlint-cli2 ${patterns[*]}"
+
+      if [[ -n $MDLINT_CONFIG && -f $MDLINT_CONFIG ]]; then
+        patterns+=( "--config" "$MDLINT_CONFIG" )
+        log_info "Using config file: $MDLINT_CONFIG"
+      else
+        log_info "No config file provided, using default."
+      fi
+
+      # Run markdownlint-cli2
+      markdownlint-cli2 "${patterns[@]}"
+    - section_end lint_markdown
+  artifacts:
+    reports:
+      codequality: result.json
+    paths:
+      - result.json

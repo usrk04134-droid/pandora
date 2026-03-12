@@ -1,0 +1,37 @@
+[project]
+name = "laserbeak"
+version = "1.0.2"
+description = "Common logging settings for infra and test Python tools."
+requires-python = ">=3.12"
+dependencies = [
+    "loguru",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["flit_core<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+pythonpath = "src"
+addopts = [
+    "-ra",
+    "-q",
+    "--import-mode=importlib"
+]
+testpaths = [
+    "tests"
+]
+python_files = [
+    "test_*.py",
+    "*_test.py"
+]
+python_functions = [
+    "test_*",
+    "*_test"
+]

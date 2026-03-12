@@ -1,0 +1,54 @@
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'hil-tests'
+    image-name:
+      description: 'The Docker image to use for the job'
+      type: string
+      default: 'registry.gitlab.com/esab/abw/infra-and-test/test-env:1.3.3'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          changes:
+            - 'hil-tests/**/*'
+          when: manual
+        - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CI_COMMIT_REF_PROTECTED == "true"'
+          when: manual
+    job-tags:
+      description: 'The HIL runner to use'
+      type: array
+    pytest-extra-args:
+      description: 'Space separated list of additional arguments for pytest'
+      type: string
+      default: '--random-order-bucket=global'
+---
+'$[[ inputs.job-name ]]':
+  image: $[[ inputs.image-name ]]
+  rules: $[[ inputs.job-rules ]]
+  tags: $[[ inputs.job-tags ]]
+  stage: test
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+  script:
+    - |
+      PYTEST_COMMAND="pytest ${CI_PROJECT_DIR}/hil-tests \
+      --capture=no \
+      --junitxml=report_$(date +%Y-%m-%d_%T).xml \
+      --verbose \
+      -r A \
+      $[[ inputs.pytest-extra-args ]]"
+
+      log_info "Executing command: ${PYTEST_COMMAND}"
+      $PYTEST_COMMAND
+  artifacts:
+    when: always
+    reports:
+      junit: ${CI_PROJECT_DIR}/report_*.xml
+    paths:
+      - ${CI_PROJECT_DIR}/sut_logs.tar.gz
+      - ${CI_PROJECT_DIR}/logs/*
+    expire_in: 1 month

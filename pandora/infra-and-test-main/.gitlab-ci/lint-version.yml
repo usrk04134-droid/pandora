@@ -1,0 +1,21 @@
+spec:
+  inputs:
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+---
+lint-version:
+  tags:
+    - smalls
+  stage: lint
+  image: registry.gitlab.com/esab/abw/infra-and-test/shellcheck:0.1.0
+  rules: $[[ inputs.job-rules ]]
+  script:
+    - '[[ $(wc -l < version.txt) -eq 1 ]] || exit 1'
+    - >
+      tr -d '\n\r' < version.txt
+      | grep -E '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$'
+      || { echo "Error: Version must follow semantic versioning (see https://semver.org/)"; exit 1; }

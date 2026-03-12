@@ -1,0 +1,44 @@
+target_sources(${BLOCK_TESTS_APPLICATION}
+    PRIVATE
+    
+    mocks/config_manager_mock.h
+    helpers/helpers.h
+    helpers/helpers_weld_data_set.h
+    helpers/helpers_abp_parameters.h
+    helpers/helpers_weld_control.h
+    helpers/helpers_weld_process_parameters.h
+    helpers/helpers_joint_geometry.h
+    helpers/helpers_simulator.h
+    helpers/helpers_json_compare.h
+    helpers/helpers_calibration.h
+    helpers/helpers_settings.h
+    helpers/helpers_state_monitor.h
+    helpers/helpers_mfx.h
+    helpers/helpers_weld_parameters.h
+    scanner/on_demand_file_image_provider.h
+    helpers/helpers_mfx_calibration.h
+    helpers/helpers_mfx_tracking.h
+
+    helpers/helpers.cc
+    joint_geometry_test.cc
+    joint_tracking_test.cc
+    weld_data_set_test.cc
+    weld_control_test.cc
+    weld_program_test.cc
+    abp_parameters_test.cc
+    shutdown_test.cc
+    version_test.cc
+    weld_process_parameters_test.cc
+    adaptive_welding_test.cc
+    settings_test.cc
+    weld_session.cc
+    ready_state_test.cc
+    scanner_basic_test.cc
+    manual_welding_log_test.cc
+    scanner/on_demand_file_image_provider.cc
+    calibration_test.cc
+    heartbeat_test.cc
+    abp_test.cc
+    weld_start.cc
+    manual_weld_test.cc
+)

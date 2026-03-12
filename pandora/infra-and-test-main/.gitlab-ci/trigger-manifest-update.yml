@@ -1,0 +1,99 @@
+# Template job for triggering a pipeline in another project to update versions in a manifest file
+#
+# Prerequisites:
+# - The target project must have a manifest file that comply with the following schema:
+#   https://gitlab.com/esab/abw/aws-architecture/-/blob/main/schemas/system-manifest.schema.json?ref_type=heads
+# - The project in which this job is run must be a flake.
+# - SERVICE_ACCOUNT_PAT: The personal access token of the service account must be available in the pipeline.
+
+spec: # https://docs.gitlab.com/ci/yaml/#spec
+  inputs:
+    job-stage: # https://docs.gitlab.com/ci/yaml/#stage
+      description: 'The stage the job will run in'
+      type: string
+      default: 'configuration'
+    job-timeout: # https://docs.gitlab.com/ci/yaml/#timeout
+      description: 'The timeout of the job'
+      type: string
+      default: '10 minutes'
+    job-rules: # https://docs.gitlab.com/ci/yaml/#rules
+      description: 'The list of rules: for the job'
+      type: array
+    job-needs: # https://docs.gitlab.com/ci/yaml/#needs
+      description: 'The list of jobs that this job depends on'
+      type: array
+      default: [] # An empty array ([]), will start the job as soon as the pipeline is created.
+    target-project-name:
+      description: 'The name of the project that contains the manifests'
+      type: string
+    manifest-path:
+      description: 'The path to the manifest file that shall be updated'
+      type: string
+    manifest-component:
+      description: 'The name of the component that shall be updated'
+      type: string
+    flake-software-name:
+      description: 'The name of the software the project flake represents'
+      type: string
+    when: # https://docs.gitlab.com/ci/yaml/#when
+      description: 'Condition for when the job runs'
+      type: string
+      default: manual
+
+---
+include:
+  - local: '/.gitlab-ci/fetch-scripts.yml'
+
+update-system-manifest:
+  stage: $[[ inputs.job-stage ]]
+  tags: [smalls]
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.0
+  rules: $[[ inputs.job-rules ]]
+  needs: $[[ inputs.job-needs ]]
+  timeout: $[[ inputs.job-timeout ]]
+  before_script:
+    - !reference [.fetch-scripts, script]
+    - PROJ_ID=$($SCRIPTS_DIR/get-project-id.sh -p "$[[ inputs.target-project-name ]]" -t "$SERVICE_ACCOUNT_PAT")
+    - BRANCH_NAME=$($SCRIPTS_DIR/get-branch-name.sh "$CI_COMMIT_SHA")
+    - >
+      DOWNLOADED_FILE_PATH=$($SCRIPTS_DIR/download-from-repository.sh
+      --project-id $PROJ_ID
+      --token "$SERVICE_ACCOUNT_PAT"
+      --ref $BRANCH_NAME
+      --source $[[ inputs.manifest-path ]])
+    - DOWNLOADED_MANIFEST=$(basename "$DOWNLOADED_FILE_PATH")
+  script:
+    - >
+      $SCRIPTS_DIR/update-manifest-by-flake.sh
+      --manifest "$DOWNLOADED_MANIFEST"
+      --component "$[[ inputs.manifest-component ]]"
+      --flake-name "$[[ inputs.flake-software-name ]]"
+      --flake-rev "$CI_COMMIT_SHA"
+      --flake-ref "$CI_COMMIT_REF_NAME"
+      --verbose
+    - echo "ARTIFACT_JOB_ID=${CI_JOB_ID}" >> dot.env
+    - echo "BRANCH_NAME=$BRANCH_NAME" >> dot.env
+    - echo "DOWNLOADED_MANIFEST=$DOWNLOADED_MANIFEST" >> dot.env
+    - echo "SYSTEM_MANIFEST_VERSION=$(yq '.version' $DOWNLOADED_MANIFEST)" >> dot.env
+  artifacts:
+    untracked: true
+    reports:
+      dotenv: dot.env
+  when: $[[ inputs.when ]]
+
+'deploy-to-$[[ inputs.target-project-name ]]':
+  stage: $[[ inputs.job-stage ]]
+  rules: $[[ inputs.job-rules ]]
+  needs:
+    - job: 'update-system-manifest'
+      artifacts: true
+  trigger:
+    project: esab/abw/$[[ inputs.target-project-name ]]
+    branch: $BRANCH_NAME
+    strategy: depend
+  variables:
+    PARENT_PROJECT_ID: $CI_PROJECT_ID
+    PARENT_JOB_ID: $ARTIFACT_JOB_ID
+    MANIFEST_ARTIFACT: $DOWNLOADED_MANIFEST
+    MANIFEST_PATH: $[[ inputs.manifest-path ]]
+  allow_failure: false

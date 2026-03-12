@@ -1,0 +1,78 @@
+# Template job script to fetch shell scripts from a GitLab repository.
+#
+# This script is designed to be included in a GitLab CI/CD pipeline,
+# and referenced from the script part of a job (!reference [.fetch-scripts, script]).
+# The script exports a variable named SCRIPTS_DIR, which contains the path to the directory
+# with the downloaded scripts.
+#
+# Requirements:
+#   - jq must be installed (used for parsing GitLab API JSON responses)
+#   - curl must be installed (used for fetching files using the GitLab API)
+#   - SERVICE_ACCOUNT_PAT: The personal access token of the service account must be available in the pipeline.
+
+spec:
+  inputs:
+    branch:
+      description: 'The branch to use when fetching the scripts'
+      type: string
+      default: 'main'
+    project-id:
+      description: 'The ID of the project to fetch the scripts from'
+      type: string
+      default: '59026355' # infra-and-test
+    source-directory:
+      description: 'The directory containing the scripts to fetch'
+      type: string
+      default: '.gitlab-ci/scripts'
+    target-directory:
+      description: 'Local directory to store downloaded scripts'
+      type: string
+      default: '/tmp/scripts'
+---
+.fetch-scripts:
+  script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start fetch_scripts "Fetching scripts" true
+    - export SCRIPTS_DIR="$[[ inputs.target-directory ]]" # Create a variable for the scripts directory
+    - mkdir -p "$SCRIPTS_DIR" # Create directory to store downloaded scripts
+    - |
+      # Fetch the directory listing
+      log_debug "Fetching directory listing from $[[ inputs.source-directory ]] in branch $[[ inputs.branch ]]..."
+      response=$(curl --silent --header "PRIVATE-TOKEN: $SERVICE_ACCOUNT_PAT" \
+        "https://gitlab.com/api/v4/projects/$[[ inputs.project-id ]]/repository/tree?path=$[[ inputs.source-directory ]]&ref=$[[ inputs.branch ]]")
+
+      # Check if the response is an error
+      if [[ "$response" == *"error"* ]]; then
+        error_msg=$(echo "$response" | jq -r '.message // "Unknown error"')
+        log_error "GitLab API error: $error_msg"
+        exit 1
+      fi
+
+      # This selects only files with a .sh extension
+      files=$(echo "$response" | jq -r '.[] | select(.name | endswith(".sh")) | .path')
+      [[ -z "$files" ]] && log_warn "No shell scripts found in $[[ inputs.source-directory ]]" && exit 0
+
+      # Download each shell script file
+      for file_path in $files; do
+        filename=$(basename "$file_path")
+        log_debug "Downloading $filename..."
+
+        # Get the file content (needs URL encoding for the file path)
+        url_encoded_path=$(echo -n "$file_path" | jq -sRr @uri)
+
+        curl --silent --header "PRIVATE-TOKEN: $SERVICE_ACCOUNT_PAT" \
+          "https://gitlab.com/api/v4/projects/$[[ inputs.project-id ]]/repository/files/$url_encoded_path/raw?ref=$[[ inputs.branch ]]" \
+          > "$SCRIPTS_DIR/$filename"
+
+        # Check if the download was successful
+        if [[ -s "$SCRIPTS_DIR/$filename" ]]; then
+          # Make the script executable
+          chmod +x "$SCRIPTS_DIR/$filename"
+          log_info "Successfully downloaded $filename"
+        else
+          log_error "Failed to download $filename or file is empty"
+          rm -f "$SCRIPTS_DIR/$filename"
+        fi
+      done
+    - log_info "All scripts successfully downloaded to $SCRIPTS_DIR"
+    - section_end fetch_scripts

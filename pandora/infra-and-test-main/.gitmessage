@@ -1,0 +1,36 @@
+# <type>[<scope>): <subject>
+#
+# - Limit to 50 characters                MAX -->|
+# - Separate from body with a blank line
+# - Capitalize; no ending period; use imperative mood
+#
+# Imperative mood? “If applied, my commit will <insert subject ...>”
+
+# <body>
+#
+# - Wrap at 72 characters                                       MAX -->|
+# - Explain WHAT and WHY not HOW; fine to be detailed
+# - Separate paragraphs with blank lines
+# - Use "-" for bullet points
+
+# [<trailers>]
+#   Link related JIRA tickets/articles (git-interpret-trailers format)
+#
+#   Examples: Issues: ADT-12345, ADT-78910
+
+# Type options:
+# - feat     new features
+# - fix      bug fixes
+# - refactor code changes that neither fix bugs nor add features
+# - style    formatting changes; white-space, indentation, etc
+# - docs     documentation changes
+# - test     adding, updating or correcting tests
+# - chore    non-production code changes, grunt tasks, etc
+# - perf     performance improvements
+# - revert   revert commits
+# - ci       CI config and script changes
+# - build    build system or dependency changes
+
+# How to Write a Git Commit Message:
+#   https://cbea.ms/git-commit/
+#   https://www.conventionalcommits.org/en/v1.0.0/#summary

@@ -1,0 +1,76 @@
+# Downstream pipeline triggers for the stage environment.
+#
+# These jobs are manually triggered when infrastructure/CI changes are made via
+# merge requests, allowing validation of changes across dependent projects.
+#
+# Note! All jobs use 'strategy: depend' to wait for downstream pipeline completion.
+# Note! Templates are versioned via TEMPLATE_REPO_BRANCH variable.
+#
+# Downstream Projects:
+#   - Adaptio (esab/abw/adaptio) - Main application
+#   - AWS Tests (esab/abw/aws-tests) - Hardware-in-the-Loop test suite
+#   - APAX PLC (esab/abw/plc/aws-platform) - PLC platform build and test
+
+run-adaptio-stage:
+  stage: downstream
+  when: always
+  allow_failure: true
+  trigger:
+    project: "esab/abw/adaptio"
+    branch: "main"
+    strategy: depend
+    forward:
+      yaml_variables: true
+      pipeline_variables: true
+  variables:
+    PIPELINE_ENV: "stage"
+    TEMPLATE_REPO_BRANCH: "$CI_COMMIT_REF_NAME"
+    TEMPLATE_TRIGGERED_FROM: "$CI_PROJECT_PATH:$CI_PIPELINE_ID"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - '.gitlab-ci/*nix*.yml'
+        - '.gitlab-ci/fetch-scripts.yml'
+        - '.gitlab-ci/k8-runner-defaults.yml'
+
+run-aws-tests-stage:
+  stage: downstream
+  when: always
+  allow_failure: true
+  trigger:
+    project: "esab/abw/aws-tests"
+    branch: "main"
+    strategy: depend
+    forward:
+      yaml_variables: true
+      pipeline_variables: true
+  variables:
+    PIPELINE_ENV: "stage"
+    TEMPLATE_REPO_BRANCH: "$CI_COMMIT_REF_NAME"
+    TEMPLATE_TRIGGERED_FROM: "$CI_PROJECT_PATH:$CI_PIPELINE_ID"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - '.gitlab-ci/hil-test.yml'
+        - '.gitlab-ci/hil-runner-defaults.yml'
+
+run-apax-stage:
+  stage: downstream
+  when: always
+  allow_failure: true
+  trigger:
+    project: "esab/abw/plc/aws-platform"
+    branch: "main"
+    strategy: depend
+    forward:
+      yaml_variables: true
+      pipeline_variables: true
+  variables:
+    PIPELINE_ENV: "stage"
+    TEMPLATE_REPO_BRANCH: "$CI_COMMIT_REF_NAME"
+    TEMPLATE_TRIGGERED_FROM: "$CI_PROJECT_PATH:$CI_PIPELINE_ID"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - '.gitlab-ci/plc-apax-build.yml'
+        - '.gitlab-ci/plc-apax-test.yml'

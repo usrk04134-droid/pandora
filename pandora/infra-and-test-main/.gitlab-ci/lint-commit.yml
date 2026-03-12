@@ -1,0 +1,12 @@
+lint-commit:
+  tags:
+    - smalls
+  stage: lint
+  image: registry.gitlab.com/esab/abw/infra-and-test/gitlint:0.3.0
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - gitlint --commits HEAD...${CI_MERGE_REQUEST_DIFF_BASE_SHA}

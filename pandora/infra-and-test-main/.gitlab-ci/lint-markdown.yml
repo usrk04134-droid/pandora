@@ -1,0 +1,45 @@
+# This job will always trigger on a change to any .md file in the project.
+#
+# If needed, directories can be excluded from the linter by setting the EXCLUDE_PATHS
+# variable to a space separated list of directory paths.
+#
+# EXCLUDE_PATHS:
+#   value: ''
+#   description: "Space separated list of directories or files to exclude from the search"
+lint-markdown:
+  tags:
+    - adaptio-k8-2
+  stage: lint
+  image: registry.gitlab.com/esab/abw/infra-and-test/markdownlint:0.2.0
+  variables:
+    EXCLUDE_PATHS: ''
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      changes:
+        - '**/*.md'
+  script:
+    - |
+      # Base command
+      find_cmd="find . -type f -iname '*.md'"
+
+      if [[ -n "$EXCLUDE_PATHS" ]]; then
+          # Read EXCLUDE_PATHS into an array
+          IFS=' ' read -r -a paths <<< "$EXCLUDE_PATHS"
+
+          for path in "${paths[@]}"; do
+              if [[ -d "$path" ]]; then
+                  find_cmd="$find_cmd ! -path \"./$path/*\""
+              else
+                  find_cmd="$find_cmd ! -path \"./$path\""
+              fi
+          done
+      fi
+
+      # Finalize the command
+      find_cmd="$find_cmd -print0 | xargs -0 mdl --ignore-front-matter --style \"$MDLINT_CONFIG\""
+
+
+      # Execute
+      echo "Executing: $find_cmd"
+      eval "$find_cmd"

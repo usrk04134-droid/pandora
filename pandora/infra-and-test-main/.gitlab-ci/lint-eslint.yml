@@ -1,0 +1,90 @@
+# Template job for linting JavaScript/TypeScript files using ESLint
+#
+# Note! If 'config-path' is set to an empty string, ESLint will search for the "closest" config file.
+#       If no config is found, it will use the tool defaults.
+#
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'lint-eslint'
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '10 minutes'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+          changes:
+            - '**/*.{js,jsx,ts,tsx,mjs,cjs}'
+    config-path:
+      description: 'The path to the ESLint configuration file'
+      type: string
+      default: '/etc/opt/eslint.config.mjs'
+
+---
+'$[[ inputs.job-name ]]':
+  image: registry.gitlab.com/esab/abw/infra-and-test/eslint:0.1.0
+  stage: lint
+  tags:
+    - smalls
+  timeout: $[[ inputs.job-timeout ]]
+  rules: $[[ inputs.job-rules ]]
+  variables:
+    GIT_DEPTH: 0
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+  script:
+    - |
+      section_start main "Lint JavaScript/TypeScript files"
+
+      if [ -n "$[[ inputs.config-path ]]" ]; then
+        CONFIG_ARG="--config $[[ inputs.config-path ]]"
+        log_info "Using ESLint config file: $[[ inputs.config-path ]]"
+        cat $[[ inputs.config-path ]]
+      else
+        CONFIG_ARG=""
+        log_info "No config file specified. Using default ESLint config"
+      fi
+
+      section_start find_files "Find JavaScript/TypeScript files that have been changed"
+      js_files=$(git diff --name-status "$CI_MERGE_REQUEST_DIFF_BASE_SHA" "$CI_COMMIT_SHA" | awk '
+        /\.(js|jsx|ts|tsx|mjs|cjs)$/ {
+          # For renamed files (R), use the new filename (field 3)
+          if ($1 ~ /^R/) {
+            print $3
+          }
+          # For added/modified files, use the filename (field 2)
+          else if ($1 ~ /^[AM]/) {
+            print $2
+          }
+          # Skip deleted files (D)
+        }
+      ' | while read file; do
+        # Only include files that actually exist
+        [ -f "$file" ] && echo "$file"
+      done)
+
+      if [ -z "$js_files" ]; then
+        log_info "No JavaScript/TypeScript files have been changed"
+        exit 0
+      fi
+
+      log_info "JavaScript/TypeScript files changed:\n$js_files"
+      section_end find_files
+
+      section_start eslint_check "Run ESLint on JavaScript/TypeScript files"
+      log_info "Linting JavaScript/TypeScript files:\n$js_files"
+      eslint ${js_files} ${CONFIG_ARG} --format json | tee result.json
+      section_end eslint_check
+
+      section_end main
+  artifacts:
+    reports:
+      codequality: result.json
+    paths:
+      - result.json

@@ -1,0 +1,42 @@
+config:
+  default: true
+  descriptive-link-text: false # MD059
+  no-emphasis-as-heading: false # MD036
+  code-block-style: # MD046
+    style: 'fenced'
+  line-length: # MD013
+    code_blocks: false
+    tables: false
+    headings: true
+    heading_line_length: 100
+    line_length: 800
+  no-duplicate-heading: # MD024
+    siblings_only: true
+  no-inline-html: false # MD033
+  no-trailing-punctuation: # MD026
+    punctuation: '.,;:!。，；：！？'
+  reference-links-images: false # MD052
+  single-title: false # MD025
+  ul-indent: # MD007
+    indent: 3
+  link-fragments: false # MD051
+
+# Ignore files referenced by .gitignore (only valid at root)
+gitignore: true
+
+# Disable banner message on stdout (only valid at root)
+noBanner: false
+
+# Disable inline config comments
+noInlineConfig: true
+
+# Disable progress on stdout (only valid at root)
+noProgress: false
+
+# Show found files on stdout (only valid at root)
+showFound: true
+
+outputFormatters:
+  - - markdownlint-cli2-formatter-codequality
+    - name: result.json
+  - - markdownlint-cli2-formatter-pretty

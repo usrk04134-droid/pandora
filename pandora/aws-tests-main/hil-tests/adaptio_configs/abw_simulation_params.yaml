@@ -1,0 +1,43 @@
+abw_simulation:
+  # General parameters
+  weld_movement_type: "circumferential"
+  target_stickout: 0.025
+  nbr_abw_points: 7
+  travel_speed: 0.01
+  root_gap: 0.005
+  total_width: 0.0702
+  joint_bottom_curv_radius: 0.5
+  joint_depth_percentage: 100.0
+  nbr_joint_bottom_points: 10
+  nbr_slices_per_rev: 360
+  drift_speed: 0.0
+  ignore_collisions: true
+  
+  # Joint Definition Left
+  left_basemetal_thickness: 0.02
+  left_groove_ang: 0.524
+  left_chamfer_ang: 0.0
+  left_chamfer_len: 0.0
+  left_root_face: 0.0
+  left_outer_diameter: 2.0
+  left_radial_offset: 0.0
+  
+  # Joint Definition Right
+  right_basemetal_thickness: 0.02
+  right_groove_ang: 0.524
+  right_chamfer_ang: 0.0
+  right_chamfer_len: 0.0
+  right_root_face: 0.0
+  right_outer_diameter: 2.0
+  right_radial_offset: 0.0
+  
+  # LPCS Config
+  lpcs_alpha: 0.1047
+  lpcs_x: 0.0
+  lpcs_y: 0.0
+  lpcs_z: 0.0
+  
+  # OPCS Config
+  opcs_x: 0.0
+  opcs_y: 0.0
+  opcs_z: 0.0

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nix-stored
+description: Nix binary cache server written in Go
+version: 0.1.1
+appVersion: "1.0.0"
+type: application
