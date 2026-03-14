@@ -41,9 +41,9 @@ class MessageName(Enum):
     SELECT_WELD_DATA_SET = "SelectWeldDataSet"
     SELECT_WELD_DATA_SET_RSP = "SelectWeldDataSetRsp"
     SUBSCRIBE_ARC_STATE = "SubscribeArcState"
-    SUBSCRIBE_ARC_STATE_RSP = "SubscribeArcStateRsp"
     GET_ARC_STATE = "GetArcState"
     GET_ARC_STATE_RSP = "GetArcStateRsp"
+    ARC_STATE = "ArcState"  # Unsolicited push from Gen2 whenever arc state changes
     SET_JOINT_GEOMETRY = "SetJointGeometry"
     GET_JOINT_GEOMETRY = "GetJointGeometry"
     GET_JOINT_GEOMETRY_RSP = "GetJointGeometryRsp"
@@ -73,7 +73,11 @@ class MessageName(Enum):
 
 @unique
 class ActivityStatus(Enum):
-    """Enum class for Adaptio activity status (matches Gen2 coordination::ActivityStatusE)."""
+    """Enum class for Adaptio activity status.
+
+    Values match the Gen2 C++ ``ActivityStatusE`` enum in
+    ``src/main/coordination/activity_status.h``.
+    """
 
     IDLE = 0
     LASER_TORCH_CALIBRATION = 1
@@ -509,20 +513,46 @@ class AdaptioWebHmi:
     def subscribe_arc_state(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
         """Subscribe to arc state change notifications.
 
-        After subscribing, the server will push ``ArcState`` messages whenever
-        the arc state changes. The response confirms the subscription was
-        accepted.
+        Gen2 does **not** send a ``SubscribeArcStateRsp``. Instead, upon
+        receiving ``SubscribeArcState``, it immediately pushes the current arc
+        state as an unsolicited ``ArcState`` message::
+
+            Python test ──SubscribeArcState──► Gen2 ManualWeld
+            Python test ◄──ArcState(state)─── Gen2 ManualWeld
+
+        This method sends the subscription request and returns the first
+        ``ArcState`` push, which carries the current arc state value.
         """
         payload = {}
 
         response = self.send_and_receive_message(
             condition,
             MessageName.SUBSCRIBE_ARC_STATE.value,
-            MessageName.SUBSCRIBE_ARC_STATE_RSP.value,
+            MessageName.ARC_STATE.value,
             payload,
         )
 
         return response
+
+    def wait_for_arc_state_push(
+        self,
+        condition: Callable[[Any], bool] | None = None,
+        max_retries: int = 10,
+    ) -> AdaptioWebHmiMessage:
+        """Wait for the next unsolicited ``ArcState`` push from Gen2.
+
+        Gen2 pushes ``{"name": "ArcState", "payload": {"state": "..."}}``
+        whenever the arc state changes (requires :meth:`subscribe_arc_state`
+        to have been called first on this connection).  No request message is
+        sent; this method only receives the next matching push.
+
+        Args:
+            condition: Optional extra filter beyond matching the message name.
+            max_retries: Maximum number of received messages to inspect before
+                raising :class:`TimeoutError`.
+        """
+        arc_condition = condition or create_name_condition(MessageName.ARC_STATE.value)
+        return self.receive_message(condition=arc_condition, max_retries=max_retries)
 
     def get_arc_state(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
         """Get the current arc state.

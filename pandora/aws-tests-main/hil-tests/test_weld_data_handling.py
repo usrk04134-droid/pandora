@@ -5,6 +5,7 @@ from loguru import logger
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi as AdaptioWebHmiClient
+from testzilla.adaptio_web_hmi.adaptio_web_hmi import MessageName
 from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
 from pydantic_core import ValidationError as PydanticCoreValidationError
 
@@ -782,15 +783,245 @@ class TestSelectWeldDataSet:
         logger.info(f"Arc state is '{state}' after SelectWeldDataSet — weld start sequence enabled")
 
     def test_subscribe_arc_state(self, request, wds_id):
-        """SubscribeArcState should return a success acknowledgement."""
+        """SubscribeArcState causes Gen2 to immediately push the current arc state.
+
+        Gen2 interaction (from ``manual_weld.cc::OnSubscribeArcState``):
+
+        Python test ──SubscribeArcState──► Gen2 ManualWeld
+        Python test ◄──ArcState(state)─── Gen2 ManualWeld
+
+        There is no ``SubscribeArcStateRsp``; the subscription confirmation IS
+        the first ``ArcState`` push containing the current state.
+        """
         uri = request.config.WEB_HMI_URI
 
         response = run_sync_in_thread(
             _call_adaptio, uri, "subscribe_arc_state",
             timeout=DEFAULT_TIMEOUT,
         )
-        logger.debug(f"SubscribeArcState response: {response}")
+        logger.debug(f"SubscribeArcState initial push: {response}")
 
-        result = _get_result(response)
-        assert result == "ok", f"Expected 'ok' but got '{result}'"
-        logger.info("SubscribeArcState succeeded")
+        # Gen2 sends an ArcState push (no result field), not SubscribeArcStateRsp
+        assert hasattr(response, "name") and response.name == MessageName.ARC_STATE.value, (
+            f"Expected 'ArcState' push, got '{getattr(response, 'name', response)}'"
+        )
+
+        payload = _get_payload(response)
+        state = payload.get("state") if isinstance(payload, dict) else None
+        valid_states = {"idle", "configured", "ready", "starting", "active"}
+        assert state in valid_states, (
+            f"Expected arc state in {valid_states}, got '{state}'"
+        )
+        logger.info(f"SubscribeArcState initial push state='{state}'")
+
+
+class TestManualWeldArcStateMonitoring:
+    """Test how infra/test code monitors arc state to detect weld start.
+
+    Architecture overview
+    ---------------------
+    The Python test layer communicates with the running Gen2 Adaptio process
+    over WebSocket (port 8080).  The Gen2 ``ManualWeld`` class maintains an
+    arc state machine::
+
+        IDLE  →  CONFIGURED  →  READY  →  STARTING  →  ACTIVE
+                                           (hw button)   (arcing)
+
+    A test subscribes to arc state changes using ``SubscribeArcState``.  Gen2
+    immediately pushes the current state, and continues pushing ``ArcState``
+    messages every time the state machine transitions.
+
+    Message flow
+    ------------
+    ::
+
+        [Python test]                  [Gen2 ManualWeld]
+             │── SubscribeArcState ──────────────────►│
+             │◄── ArcState(idle) ─────────────────────│  (immediate push)
+             │                                        │
+             │── SelectWeldDataSet(id) ───────────────►│
+             │◄── SelectWeldDataSetRsp(ok) ────────────│  (sync response)
+             │◄── ArcState(configured) ───────────────│  (state change push)
+             │                                        │
+             │  [when weld systems report READY_TO_START]
+             │◄── ArcState(ready) ────────────────────│
+             │                                        │
+             │  [operator presses hardware start button]
+             │◄── ArcState(starting) ─────────────────│
+             │◄── ArcState(active) ───────────────────│  (arcing confirmed)
+
+    These tests use a single persistent ``AdaptioWebHmiClient`` so the
+    subscription remains active across multiple operations.
+    """
+
+    WPP_NAME_WS1 = "test_wpp_ws1_mon"
+    WPP_NAME_WS2 = "test_wpp_ws2_mon"
+    WDS_NAME = "test_wds_mon"
+
+    WPP_BASE = {
+        "method": "dc",
+        "regulationType": "cc",
+        "startAdjust": 10,
+        "startType": "scratch",
+        "voltage": 24.5,
+        "current": 150.0,
+        "wireSpeed": 12.5,
+        "iceWireSpeed": 0.0,
+        "acFrequency": 60.0,
+        "acOffset": 1.2,
+        "acPhaseShift": 0.5,
+        "craterFillTime": 2.0,
+        "burnBackTime": 1.0,
+    }
+
+    def _get_list_payload(self, uri, method_name):
+        """Return the response payload as a list."""
+        return _to_list(_get_payload(
+            run_sync_in_thread(_call_adaptio, uri, method_name, timeout=DEFAULT_TIMEOUT)
+        ))
+
+    def _cleanup(self, uri):
+        """Best-effort cleanup of all test-owned entries."""
+        for wds in self._get_list_payload(uri, "get_weld_data_sets"):
+            if wds.get("name") == self.WDS_NAME:
+                try:
+                    run_sync_in_thread(
+                        _call_adaptio, uri, "remove_weld_data_set",
+                        id=wds["id"], timeout=DEFAULT_TIMEOUT,
+                    )
+                except Exception as exc:
+                    logger.warning(f"WDS cleanup failed: {exc}")
+
+        for wpp_name in (self.WPP_NAME_WS1, self.WPP_NAME_WS2):
+            for wpp in self._get_list_payload(uri, "get_weld_process_parameters"):
+                if wpp.get("name") == wpp_name:
+                    try:
+                        run_sync_in_thread(
+                            _call_adaptio, uri, "remove_weld_process_parameters",
+                            id=wpp["id"], timeout=DEFAULT_TIMEOUT,
+                        )
+                    except Exception as exc:
+                        logger.warning(f"WPP cleanup for '{wpp_name}' failed: {exc}")
+
+    @pytest.fixture()
+    def wds_id(self, request):
+        """Create a complete WPP + WDS setup and return the WDS ID."""
+        uri = request.config.WEB_HMI_URI
+        self._cleanup(uri)
+
+        for name in (self.WPP_NAME_WS1, self.WPP_NAME_WS2):
+            resp = run_sync_in_thread(
+                _call_adaptio, uri, "add_weld_process_parameters",
+                timeout=DEFAULT_TIMEOUT, **{**self.WPP_BASE, "name": name}
+            )
+            assert _get_result(resp) == "ok", f"Pre-condition: WPP '{name}' creation failed"
+
+        wpp_list = self._get_list_payload(uri, "get_weld_process_parameters")
+        ws1_id = next((e["id"] for e in wpp_list if e.get("name") == self.WPP_NAME_WS1), None)
+        ws2_id = next((e["id"] for e in wpp_list if e.get("name") == self.WPP_NAME_WS2), None)
+        assert ws1_id is not None and ws2_id is not None, "Pre-condition: WPP IDs not found"
+
+        add_resp = run_sync_in_thread(
+            _call_adaptio, uri, "add_weld_data_set",
+            timeout=DEFAULT_TIMEOUT,
+            name=self.WDS_NAME, ws1WppId=ws1_id, ws2WppId=ws2_id,
+        )
+        assert _get_result(add_resp) == "ok", "Pre-condition: WDS creation failed"
+
+        wds_list = self._get_list_payload(uri, "get_weld_data_sets")
+        wds_id = next((e["id"] for e in wds_list if e.get("name") == self.WDS_NAME), None)
+        assert wds_id is not None, "Pre-condition: WDS not found"
+
+        yield wds_id
+        self._cleanup(uri)
+
+    def test_subscribe_arc_state_receives_initial_push(self, request, wds_id):
+        """SubscribeArcState immediately returns the current arc state as a push.
+
+        This test shows the subscribe-and-receive interaction with Gen2.  The
+        ``subscribe_arc_state()`` method sends ``SubscribeArcState`` and
+        returns the first ``ArcState`` push that Gen2 sends back immediately
+        (containing the current arc state value).
+        """
+        uri = request.config.WEB_HMI_URI
+
+        def run_in_thread():
+            client = AdaptioWebHmiClient(uri=uri)
+            try:
+                return client.subscribe_arc_state()
+            finally:
+                cleanup_web_hmi_client(client)
+
+        push = run_sync_in_thread(run_in_thread, timeout=DEFAULT_TIMEOUT)
+        logger.debug(f"SubscribeArcState initial push: {push}")
+
+        assert push.name == MessageName.ARC_STATE.value, (
+            f"Expected 'ArcState' push, got '{push.name}'"
+        )
+        state = _get_payload(push).get("state") if isinstance(_get_payload(push), dict) else None
+        valid_states = {"idle", "configured", "ready", "starting", "active"}
+        assert state in valid_states, (
+            f"Arc state '{state}' not in valid states {valid_states}"
+        )
+        logger.info(f"SubscribeArcState confirmed: current arc state is '{state}'")
+
+    def test_arc_state_push_on_wds_select(self, request, wds_id):
+        """SelectWeldDataSet causes Gen2 to push ArcState(configured) to all subscribers.
+
+        This is the mechanism to detect that weld start is enabled. The flow:
+
+        1. Subscribe to arc state on a persistent connection.
+        2. Call SelectWeldDataSet (configures weld systems with WPP parameters).
+        3. Receive the ArcState push showing CONFIGURED — the weld start sequence
+           is now armed.  On a fully connected HIL, the state further advances to
+           READY when power sources report READY_TO_START.
+
+        The persistent WebSocket connection is essential: without it, the
+        subscription is lost when the connection closes after step 1.
+        """
+        uri = request.config.WEB_HMI_URI
+        valid_states = {"idle", "configured", "ready", "starting", "active"}
+
+        def run_in_thread():
+            client = AdaptioWebHmiClient(uri=uri)
+            try:
+                # Step 1: Subscribe — Gen2 pushes current state immediately
+                initial_push = client.subscribe_arc_state()
+                initial_state = (
+                    _get_payload(initial_push).get("state")
+                    if isinstance(_get_payload(initial_push), dict)
+                    else None
+                )
+                logger.info(f"Initial arc state: '{initial_state}'")
+
+                # Step 2: Select WDS — Gen2 configures weld systems and transitions
+                #         arc state from IDLE → CONFIGURED, then pushes ArcState
+                sel_resp = client.select_weld_data_set(id=wds_id)
+                assert _get_result(sel_resp) == "ok", "SelectWeldDataSet failed"
+
+                # Step 3: Wait for the ArcState push triggered by SelectWeldDataSet
+                state_push = client.wait_for_arc_state_push()
+                return initial_state, state_push
+            finally:
+                cleanup_web_hmi_client(client)
+
+        initial_state, state_push = run_sync_in_thread(run_in_thread, timeout=DEFAULT_TIMEOUT)
+
+        assert state_push.name == MessageName.ARC_STATE.value, (
+            f"Expected 'ArcState' push, got '{state_push.name}'"
+        )
+
+        new_state = (
+            _get_payload(state_push).get("state")
+            if isinstance(_get_payload(state_push), dict)
+            else None
+        )
+        assert new_state in valid_states, f"New arc state '{new_state}' not in {valid_states}"
+        assert new_state != "idle", (
+            f"Arc state must leave 'idle' after SelectWeldDataSet, got '{new_state}'. "
+            "Expected 'configured' or 'ready' — weld start sequence is now armed."
+        )
+        logger.info(
+            f"Arc state transitioned '{initial_state}' → '{new_state}' "
+            "after SelectWeldDataSet. Weld start sequence is armed."
+        )

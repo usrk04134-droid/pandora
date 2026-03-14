@@ -744,10 +744,15 @@ class TestAdaptioWebHmiApiMethods:
         mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
 
     def test_subscribe_arc_state(self, mock_websocket_client_sync):
-        """Test subscribing to arc state notifications."""
+        """Test subscribing to arc state notifications.
+
+        Gen2 does NOT send SubscribeArcStateRsp. It immediately pushes the
+        current arc state as an unsolicited ArcState message.
+        """
         # Preparation
         request = AdaptioWebHmiMessage(name="SubscribeArcState", payload={})
-        response = AdaptioWebHmiMessage(name="SubscribeArcStateRsp", payload={"result": "ok"})
+        # Gen2 responds with an ArcState push (not SubscribeArcStateRsp)
+        response = AdaptioWebHmiMessage(name="ArcState", payload={"state": "idle"})
         mock_websocket_client_sync.receive_message.return_value = str(response)
 
         # Execution
@@ -755,9 +760,25 @@ class TestAdaptioWebHmiApiMethods:
         result = client.subscribe_arc_state()
 
         # Verification
-        assert result.name == MessageName.SUBSCRIBE_ARC_STATE_RSP.value
+        assert result.name == MessageName.ARC_STATE.value
         assert result.payload == response.payload
         mock_websocket_client_sync.send_message.assert_called_once_with(str(request))
+        mock_websocket_client_sync.receive_message.assert_called_once()
+
+    def test_wait_for_arc_state_push(self, mock_websocket_client_sync):
+        """Test waiting for an unsolicited ArcState push after subscribing."""
+        # Preparation — no request sent, only a receive
+        push = AdaptioWebHmiMessage(name="ArcState", payload={"state": "configured"})
+        mock_websocket_client_sync.receive_message.return_value = str(push)
+
+        # Execution
+        client = AdaptioWebHmi(uri="ws://testserver")
+        result = client.wait_for_arc_state_push()
+
+        # Verification — no send, just a receive matching "ArcState"
+        assert result.name == MessageName.ARC_STATE.value
+        assert result.payload == push.payload
+        mock_websocket_client_sync.send_message.assert_not_called()
         mock_websocket_client_sync.receive_message.assert_called_once()
 
     def test_get_arc_state(self, mock_websocket_client_sync):
