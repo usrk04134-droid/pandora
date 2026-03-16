@@ -13,6 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from testzilla.power_supply.aimtti_cpx200dp import AimTTiCPX200DPPowerSupply
 from testzilla.power_supply.keysight_e36234a import KeysightE36234APowerSupply
 from testzilla.utility.socket_manager import SocketManager
+from testzilla.utility.websocket_client import WebSocketClientSync
 from testzilla.remote_comm.remote_host import RemoteHostManager
 
 
@@ -124,7 +125,7 @@ def socket_manager():
 
 @pytest.fixture
 def mock_websocket_client_sync():
-    with patch("testzilla.adaptio_web_hmi.adaptio_web_hmi.WebSocketClientSync") as MockWebSocket:
+    with patch("testzilla.adaptio_web_hmi.adaptio_web_hmi.WebSocketClientSync", spec=WebSocketClientSync) as MockWebSocket:
         instance = MockWebSocket.return_value
         instance.connect.return_value = None
         instance.is_connected.return_value = True

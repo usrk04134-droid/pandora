@@ -21,3 +21,13 @@ dependencies = ["fabric",
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["testzilla*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+filterwarnings = [
+    "ignore:.*coroutine.*never awaited.*:RuntimeWarning",
+    "ignore:Event loop is closed:RuntimeWarning",
+    "ignore:.*Task was destroyed but it is pending.*:RuntimeWarning",
+    "ignore:.*Exception ignored in.*WebSocketCommonProtocol.*:pytest.PytestUnraisableExceptionWarning",
+    "ignore:.*RuntimeError.*Event loop is closed.*:pytest.PytestUnraisableExceptionWarning",
+]
