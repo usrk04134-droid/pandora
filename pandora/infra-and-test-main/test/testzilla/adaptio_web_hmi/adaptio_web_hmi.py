@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from enum import Enum, unique
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List, Union
 
 import websockets.exceptions as websocketsExc
 from loguru import logger
@@ -24,10 +24,26 @@ class MessageName(Enum):
     GET_ADAPTIO_VERSION_RSP = "GetAdaptioVersionRsp"
     ADD_WELD_PROCESS_PARAMETERS = "AddWeldProcessParameters"
     ADD_WELD_PROCESS_PARAMETERS_RSP = "AddWeldProcessParametersRsp"
+    GET_WELD_PROCESS_PARAMETERS = "GetWeldProcessParameters"
+    GET_WELD_PROCESS_PARAMETERS_RSP = "GetWeldProcessParametersRsp"
+    UPDATE_WELD_PROCESS_PARAMETERS = "UpdateWeldProcessParameters"
+    UPDATE_WELD_PROCESS_PARAMETERS_RSP = "UpdateWeldProcessParametersRsp"
+    REMOVE_WELD_PROCESS_PARAMETERS = "RemoveWeldProcessParameters"
+    REMOVE_WELD_PROCESS_PARAMETERS_RSP = "RemoveWeldProcessParametersRsp"
     ADD_WELD_DATA_SET = "AddWeldDataSet"
     ADD_WELD_DATA_SET_RSP = "AddWeldDataSetRsp"
+    GET_WELD_DATA_SETS = "GetWeldDataSets"
+    GET_WELD_DATA_SETS_RSP = "GetWeldDataSetsRsp"
+    UPDATE_WELD_DATA_SET = "UpdateWeldDataSet"
+    UPDATE_WELD_DATA_SET_RSP = "UpdateWeldDataSetRsp"
+    REMOVE_WELD_DATA_SET = "RemoveWeldDataSet"
+    REMOVE_WELD_DATA_SET_RSP = "RemoveWeldDataSetRsp"
     SELECT_WELD_DATA_SET = "SelectWeldDataSet"
     SELECT_WELD_DATA_SET_RSP = "SelectWeldDataSetRsp"
+    SUBSCRIBE_ARC_STATE = "SubscribeArcState"
+    GET_ARC_STATE = "GetArcState"
+    GET_ARC_STATE_RSP = "GetArcStateRsp"
+    ARC_STATE = "ArcState"  # Unsolicited push from Gen2 whenever arc state changes
     SET_JOINT_GEOMETRY = "SetJointGeometry"
     GET_JOINT_GEOMETRY = "GetJointGeometry"
     GET_JOINT_GEOMETRY_RSP = "GetJointGeometryRsp"
@@ -57,22 +73,26 @@ class MessageName(Enum):
 
 @unique
 class ActivityStatus(Enum):
-    """Enum class for Adaptio activity status."""
+    """Enum class for Adaptio activity status.
+
+    Values match the Gen2 C++ ``ActivityStatusE`` enum in
+    ``src/main/coordination/activity_status.h``.
+    """
 
     IDLE = 0
     LASER_TORCH_CALIBRATION = 1
     WELD_OBJECT_CALIBRATION = 2
-    TRACKING = 3
-    SERVICE_MODE_TRACKING = 4
-    SERVICE_MODE_KINEMATICS = 5
-    SERVICE_MODE_IMAGE_COLLECTION = 6
+    CALIBRATION_AUTO_MOVE = 3
+    TRACKING = 4
+    LW_CALIBRATION = 5
+    MANUAL_WELDING = 6
 
 
 class AdaptioWebHmiMessage(BaseModel):
     """Base class for the Adaptio WebHMI message format."""
 
     name: str
-    payload: Dict[str, Any]
+    payload: Union[Dict[str, Any], List[Dict[str, Any]]]
     result: str | None = None  # New separate result field in response
 
     def __str__(self):
@@ -316,6 +336,158 @@ class AdaptioWebHmi:
 
         return response
 
+    def get_weld_process_parameters(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
+        """Get the list of all weld process parameters."""
+        payload = {}
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.GET_WELD_PROCESS_PARAMETERS.value,
+            MessageName.GET_WELD_PROCESS_PARAMETERS_RSP.value,
+            payload,
+        )
+
+        return response
+
+    def update_weld_process_parameters(
+        self, condition: Callable[[Any], bool] | None = None, **kwargs
+    ) -> AdaptioWebHmiMessage:
+        """Update existing weld process parameters.
+
+        Args:
+            kwargs:
+                - **id** (int): Weld process parameter ID.
+                - **name** (str): Weld process name.
+                - **method** (str): Weld method.
+                - **regulationType** (str): Regulation type.
+                - **startAdjust** (int): Start adjust.
+                - **startType** (str): Start type.
+                - **voltage** (float): Voltage.
+                - **current** (float): Current.
+                - **wireSpeed** (float): Wire speed.
+                - **iceWireSpeed** (float): Ice wire speed.
+                - **acFrequency** (float): AC frequency.
+                - **acOffset** (float): AC offset.
+                - **acPhaseShift** (float): AC phase shift.
+                - **craterFillTime** (float): Crater fill time.
+                - **burnBackTime** (float): Burn back time.
+        """
+        fields = {
+            "id": (int, 0),
+            "name": (str, ""),
+            "method": (str, ""),
+            "regulationType": (str, ""),
+            "startAdjust": (int, 0),
+            "startType": (str, ""),
+            "voltage": (float, 0.0),
+            "current": (float, 0.0),
+            "wireSpeed": (float, 0.0),
+            "iceWireSpeed": (float, 0.0),
+            "acFrequency": (float, 0.0),
+            "acOffset": (float, 0.0),
+            "acPhaseShift": (float, 0.0),
+            "craterFillTime": (float, 0.0),
+            "burnBackTime": (float, 0.0),
+        }
+
+        payload = validate_kwargs(fields, **kwargs).model_dump()
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.UPDATE_WELD_PROCESS_PARAMETERS.value,
+            MessageName.UPDATE_WELD_PROCESS_PARAMETERS_RSP.value,
+            payload,
+        )
+
+        return response
+
+    def remove_weld_process_parameters(
+        self, condition: Callable[[Any], bool] | None = None, **kwargs
+    ) -> AdaptioWebHmiMessage:
+        """Remove weld process parameters by ID.
+
+        Args:
+            kwargs:
+                - **id** (int): Weld process parameter ID.
+        """
+        fields = {
+            "id": (int, 0),
+        }
+
+        payload = validate_kwargs(fields, **kwargs).model_dump()
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.REMOVE_WELD_PROCESS_PARAMETERS.value,
+            MessageName.REMOVE_WELD_PROCESS_PARAMETERS_RSP.value,
+            payload,
+        )
+
+        return response
+
+    def get_weld_data_sets(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
+        """Get the list of all weld data sets."""
+        payload = {}
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.GET_WELD_DATA_SETS.value,
+            MessageName.GET_WELD_DATA_SETS_RSP.value,
+            payload,
+        )
+
+        return response
+
+    def update_weld_data_set(self, condition: Callable[[Any], bool] | None = None, **kwargs) -> AdaptioWebHmiMessage:
+        """Update an existing weld data set.
+
+        Args:
+            kwargs:
+                - **id** (int): Weld data set ID.
+                - **name** (str): Weld data set name.
+                - **ws1WppId** (int): Weld system 1 weld process parameter ID.
+                - **ws2WppId** (int): Weld system 2 weld process parameter ID.
+        """
+        fields = {
+            "id": (int, 0),
+            "name": (str, ""),
+            "ws1WppId": (int, 0),
+            "ws2WppId": (int, 0),
+        }
+
+        payload = validate_kwargs(fields, **kwargs).model_dump()
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.UPDATE_WELD_DATA_SET.value,
+            MessageName.UPDATE_WELD_DATA_SET_RSP.value,
+            payload,
+        )
+
+        return response
+
+    def remove_weld_data_set(self, condition: Callable[[Any], bool] | None = None, **kwargs) -> AdaptioWebHmiMessage:
+        """Remove a weld data set by ID.
+
+        Args:
+            kwargs:
+                - **id** (int): Weld data set ID.
+        """
+        fields = {
+            "id": (int, 0),
+        }
+
+        payload = validate_kwargs(fields, **kwargs).model_dump()
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.REMOVE_WELD_DATA_SET.value,
+            MessageName.REMOVE_WELD_DATA_SET_RSP.value,
+            payload,
+        )
+
+        return response
+
     def select_weld_data_set(self, condition: Callable[[Any], bool] | None = None, **kwargs) -> AdaptioWebHmiMessage:
         """Select weld data set.
 
@@ -333,6 +505,67 @@ class AdaptioWebHmi:
             condition,
             MessageName.SELECT_WELD_DATA_SET.value,
             MessageName.SELECT_WELD_DATA_SET_RSP.value,
+            payload,
+        )
+
+        return response
+
+    def subscribe_arc_state(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
+        """Subscribe to arc state change notifications.
+
+        Gen2 does **not** send a ``SubscribeArcStateRsp``. Instead, upon
+        receiving ``SubscribeArcState``, it immediately pushes the current arc
+        state as an unsolicited ``ArcState`` message::
+
+            Python test ──SubscribeArcState──► Gen2 ManualWeld
+            Python test ◄──ArcState(state)─── Gen2 ManualWeld
+
+        This method sends the subscription request and returns the first
+        ``ArcState`` push, which carries the current arc state value.
+        """
+        payload = {}
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.SUBSCRIBE_ARC_STATE.value,
+            MessageName.ARC_STATE.value,
+            payload,
+        )
+
+        return response
+
+    def wait_for_arc_state_push(
+        self,
+        condition: Callable[[Any], bool] | None = None,
+        max_retries: int = 10,
+    ) -> AdaptioWebHmiMessage:
+        """Wait for the next unsolicited ``ArcState`` push from Gen2.
+
+        Gen2 pushes ``{"name": "ArcState", "payload": {"state": "..."}}``
+        whenever the arc state changes (requires :meth:`subscribe_arc_state`
+        to have been called first on this connection).  No request message is
+        sent; this method only receives the next matching push.
+
+        Args:
+            condition: Optional extra filter beyond matching the message name.
+            max_retries: Maximum number of received messages to inspect before
+                raising :class:`TimeoutError`.
+        """
+        arc_condition = condition or create_name_condition(MessageName.ARC_STATE.value)
+        return self.receive_message(condition=arc_condition, max_retries=max_retries)
+
+    def get_arc_state(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
+        """Get the current arc state.
+
+        Returns the current arc state string (``idle``, ``configured``,
+        ``ready``, ``starting``, or ``active``).
+        """
+        payload = {}
+
+        response = self.send_and_receive_message(
+            condition,
+            MessageName.GET_ARC_STATE.value,
+            MessageName.GET_ARC_STATE_RSP.value,
             payload,
         )
 
