@@ -53,6 +53,10 @@ class MessageName(Enum):
     START_TRACKING = "StartTracking"
     GET_PLC_SW_VERSION = "GetPlcSwVersion"
     GET_PLC_SW_VERSION_RSP = "GetPlcSwVersionRsp"
+    SUBSCRIBE_ARC_STATE = "SubscribeArcState"
+    ARC_STATE = "ArcState"
+    GET_ARC_STATE = "GetArcState"
+    GET_ARC_STATE_RSP = "GetArcStateRsp"
 
 
 @unique
@@ -581,3 +585,99 @@ class AdaptioWebHmi:
         )
 
         return response
+
+    def subscribe_arc_state(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
+        """Subscribe to ArcState push notifications from Adaptio.
+
+        Sends a SubscribeArcState request.  Adaptio immediately pushes the
+        current arc state and continues pushing on every subsequent state
+        change.  This method returns the *initial* push (the current state at
+        subscription time).
+
+        After calling this method, use :meth:`wait_for_arc_state` on the same
+        instance to receive subsequent state-change push notifications without
+        having to poll.
+
+        Arc state values: "idle" | "configured" | "ready" | "starting" | "active"
+
+        Returns:
+            AdaptioWebHmiMessage containing the current arc state in
+            ``payload["state"]``.
+        """
+        response = self.send_and_receive_message(
+            condition or create_name_condition(MessageName.ARC_STATE.value),
+            MessageName.SUBSCRIBE_ARC_STATE.value,
+            MessageName.ARC_STATE.value,
+            {},
+        )
+        return response
+
+    def get_arc_state(self, condition: Callable[[Any], bool] | None = None) -> AdaptioWebHmiMessage:
+        """Request the current arc state from Adaptio (request / response).
+
+        Unlike :meth:`subscribe_arc_state`, this is a one-shot request that
+        does not register a push subscription.  Use it when you only need the
+        current state once without subscribing to future changes.
+
+        Returns:
+            AdaptioWebHmiMessage with ``payload["state"]`` set to the current
+            arc state string.
+        """
+        return self.send_and_receive_message(
+            condition or create_name_condition(MessageName.GET_ARC_STATE_RSP.value),
+            MessageName.GET_ARC_STATE.value,
+            MessageName.GET_ARC_STATE_RSP.value,
+            {},
+        )
+
+    def wait_for_arc_state(self, expected_state: str, timeout_s: float = 60.0) -> AdaptioWebHmiMessage:
+        """Wait for an ArcState push notification matching *expected_state*.
+
+        Requires :meth:`subscribe_arc_state` to have been called first on
+        this instance.  Continuously reads incoming messages from the
+        WebSocket, discarding any that are not ``ArcState`` pushes or that
+        carry a different state, until a matching push arrives or the timeout
+        expires.
+
+        This mirrors the ``ReceiveJsonByName(mfx.Main(), "ArcState")`` pattern
+        used in the Adaptio block tests (``manual_weld_test.cc``).
+
+        Args:
+            expected_state: One of "idle" | "configured" | "ready" |
+                "starting" | "active".
+            timeout_s: Maximum seconds to wait before raising
+                ``TimeoutError``.
+
+        Returns:
+            The matching ArcState :class:`AdaptioWebHmiMessage`.
+
+        Raises:
+            TimeoutError: If *expected_state* is not received within
+                *timeout_s*.
+        """
+        import time as _time
+
+        deadline = _time.monotonic() + timeout_s
+        # Each individual receive call blocks for at most this many seconds.
+        per_recv_timeout = 5
+
+        while True:
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"Arc state did not reach {expected_state!r} within {timeout_s}s"
+                )
+
+            recv_timeout = min(per_recv_timeout, int(remaining) + 1)
+            try:
+                raw = self.ws_client.receive_message(timeout=recv_timeout)
+            except (asyncio.TimeoutError, TimeoutError):
+                # No message in this window; loop back to check the deadline.
+                continue
+
+            data = json.loads(raw)
+            if data.get("name") == MessageName.ARC_STATE.value:
+                state = data.get("payload", {}).get("state")
+                logger.debug(f"ArcState push received: {state!r} (waiting for {expected_state!r})")
+                if state == expected_state:
+                    return AdaptioWebHmiMessage.model_validate_json(raw)
