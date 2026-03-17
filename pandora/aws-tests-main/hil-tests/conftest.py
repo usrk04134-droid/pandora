@@ -18,7 +18,7 @@ from laserbeak import logger, setup_logging
 
 from managers import AdaptioManager, TestRailManager
 from testzilla.utility.playwright import PlaywrightManager
-from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi
+from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi, create_name_condition
 from testzilla.plc.models import PlcProgramWrite
 from testzilla.plc.plc_json_rpc import PlcJsonRpc
 from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
@@ -1152,11 +1152,7 @@ def get_weld_process_parameters_config(weld_system: str = "ws1") -> dict:
     with open(yaml_file_path, "r") as file:
         data = yaml.safe_load(file)
 
-    yaml_key = None
-    for key in data.keys():
-        if key.startswith(f"weld_process_parameters_{weld_system}"):
-            yaml_key = key
-            break
+    yaml_key = next((key for key in data.keys() if key.startswith(f"weld_process_parameters_{weld_system}")), None)
 
     if yaml_key is None:
         raise ValueError(f"Weld process parameters for '{weld_system}' not found in {yaml_file_path}")
@@ -1315,7 +1311,6 @@ def receive_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
         Arc state string if received, None otherwise
     """
     try:
-        from testzilla.adaptio_web_hmi.adaptio_web_hmi import create_name_condition
         condition = create_name_condition(name="ArcState")
         response = web_hmi.receive_message(condition=condition)
         logger.debug(f"Received ArcState: {response}")
