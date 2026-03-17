@@ -1152,9 +1152,9 @@ def get_weld_process_parameters_config(weld_system: str = "ws1") -> dict:
     with open(yaml_file_path, "r") as file:
         data = yaml.safe_load(file)
 
-    yaml_key = next((key for key in data.keys() if key.startswith(f"weld_process_parameters_{weld_system}")), None)
+    yaml_key = f"weld_process_parameters_{weld_system}"
 
-    if yaml_key is None:
+    if yaml_key not in data:
         raise ValueError(f"Weld process parameters for '{weld_system}' not found in {yaml_file_path}")
 
     config = data[yaml_key]
@@ -1312,6 +1312,8 @@ def receive_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
     """
     try:
         condition = create_name_condition(name="ArcState")
+        # Use higher max_retries than default (5) to allow for other WebSocket
+        # messages (e.g. status pushes) that may arrive before the expected ArcState.
         response = web_hmi.receive_message(condition=condition, max_retries=10)
         logger.debug(f"Received ArcState: {response}")
         if response:
