@@ -1131,7 +1131,7 @@ def set_joint_geometry(
         else:
             logger.warning("Failed to set joint geometry")
             return False
-    except TimeoutError:
+    except Exception:
         logger.exception("Failed to set Adaptio joint geometry")
         return False
 
@@ -1196,7 +1196,7 @@ def add_weld_process_parameters(web_hmi: AdaptioWebHmi, **kwargs) -> bool:
         else:
             logger.warning(f"Failed to add weld process parameters: {kwargs.get('name', '')}")
             return False
-    except (TimeoutError, ConnectionError, OSError):
+    except Exception:
         logger.exception("Failed to add weld process parameters")
         return False
 
@@ -1223,7 +1223,7 @@ def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wp
         else:
             logger.warning(f"Failed to add weld data set: {name}")
             return False
-    except (TimeoutError, ConnectionError, OSError):
+    except Exception:
         logger.exception("Failed to add weld data set")
         return False
 
@@ -1248,7 +1248,7 @@ def select_weld_data_set(web_hmi: AdaptioWebHmi, weld_data_set_id: int) -> bool:
         else:
             logger.warning(f"Failed to select weld data set: {weld_data_set_id}")
             return False
-    except (TimeoutError, ConnectionError, OSError):
+    except Exception:
         logger.exception("Failed to select weld data set")
         return False
 
@@ -1271,7 +1271,7 @@ def get_weld_data_sets(web_hmi: AdaptioWebHmi) -> list | None:
         )
         logger.debug(f"Received response: {response}")
         return response.payload if response else None
-    except (TimeoutError, ConnectionError, OSError):
+    except Exception:
         logger.exception("Failed to get weld data sets")
         return None
 
@@ -1296,7 +1296,7 @@ def subscribe_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
         if response:
             return response.payload.get("state")
         return None
-    except (TimeoutError, ConnectionError, OSError):
+    except Exception:
         logger.exception("Failed to subscribe to arc state")
         return None
 
@@ -1319,7 +1319,7 @@ def receive_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
         if response:
             return response.payload.get("state")
         return None
-    except (TimeoutError, ConnectionError, OSError):
+    except Exception:
         logger.exception("Timed out waiting for arc state update")
         return None
 
