@@ -1,16 +1,25 @@
-"""HIL test cases for weld data handling and starting a manual weld.
+"""HIL test cases for weld data handling and starting a manual weld (Gen 2).
 
-Covers the weld data handling use case for Gen 2:
-- Adding weld process parameters (WPP) for each weld system (WS1, WS2)
-- Creating a weld data set (WDS) that references the WPPs
-- Selecting the weld data set to configure the system for manual welding
+Full use-case coverage for sysfun-welddata-handling.md:
 
-The PLC is not involved in this use case; all interactions go through the WebHMI
-WebSocket API (AdaptioWebHmi).
+1. Create Weld Process Parameters (WPP) for each weld system (WS1, WS2).
+2. Create a Weld Data Set (WDS) that references those WPPs.
+3. SelectWeldDataSet → Adaptio configures the weld systems and the arc state
+   transitions to CONFIGURED, then to READY once the power sources report
+   READY_TO_START.
+4. The operator presses the hardware start button which starts the arc
+   (simulated in HIL by writing the Start flag on the PLC).
 
-Reference: sysfun-welddata-handling.md
+Arc state machine (ManualWeld::ArcState):
+    idle  →  configured  →  ready  →  starting  →  active
+
+All Adaptio interactions go through the WebHMI WebSocket API (AdaptioWebHmi).
+PLC data / state is NOT checked (the PLC is not part of this use case), but
+the hardware start-button signal IS sent via the PLC interface:
+    "Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Start (bool)
 """
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Iterator
@@ -20,6 +29,7 @@ from loguru import logger
 from pydantic_core import ValidationError as PydanticCoreValidationError
 
 from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi as AdaptioWebHmiClient
+from testzilla.plc.plc_json_rpc import PlcJsonRpc
 from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
 
 # ---------------------------------------------------------------------------
@@ -126,6 +136,92 @@ def _extract_id(response) -> int | None:
     if hasattr(response, "payload"):
         return response.payload.get("id")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Arc state helpers
+# ---------------------------------------------------------------------------
+
+# PLC address used to simulate the hardware start button (DataToAdaptio).
+# Writing True to this flag triggers a START button-state change in Adaptio,
+# transitioning the arc state from READY → STARTING.
+_PLC_START_ADDR = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Start'
+
+
+def _get_current_arc_state(uri: str) -> str:
+    """Return the current arc state string from Adaptio via GetArcState.
+
+    Uses the request/response API so it does not require a persistent
+    WebSocket subscription.
+    """
+    try:
+        response = _run_sync_in_thread(
+            _run_adaptio_send,
+            uri,
+            request_name="GetArcState",
+            response_name="GetArcStateRsp",
+            payload={},
+            timeout=5,
+        )
+        if hasattr(response, "payload"):
+            return response.payload.get("state", "unknown")
+        if isinstance(response, dict):
+            payload = response.get("payload", {})
+            if isinstance(payload, dict):
+                return payload.get("state", "unknown")
+    except TimeoutError:
+        logger.warning("Timeout polling GetArcState")
+    return "unknown"
+
+
+def _wait_for_arc_state(
+    uri: str,
+    expected_state: str,
+    timeout_s: float = 60.0,
+    poll_interval_s: float = 1.0,
+) -> str:
+    """Poll GetArcState until it reaches *expected_state* or the timeout expires.
+
+    Args:
+        uri:             WebHMI WebSocket URI.
+        expected_state:  One of "idle" | "configured" | "ready" | "starting" | "active".
+        timeout_s:       Maximum seconds to wait before raising TimeoutError.
+        poll_interval_s: Seconds between polls.
+
+    Returns:
+        The final arc state string when the expected state is reached.
+
+    Raises:
+        TimeoutError: If *expected_state* is not reached within *timeout_s*.
+    """
+    deadline = time.monotonic() + timeout_s
+    last_state = "unknown"
+    while time.monotonic() < deadline:
+        last_state = _get_current_arc_state(uri)
+        logger.debug(f"Arc state poll: {last_state!r} (waiting for {expected_state!r})")
+        if last_state == expected_state:
+            return last_state
+        time.sleep(poll_interval_s)
+    raise TimeoutError(
+        f"Arc state did not reach {expected_state!r} within {timeout_s}s "
+        f"(last observed state: {last_state!r})"
+    )
+
+
+def _press_start_button(plc: PlcJsonRpc) -> None:
+    """Simulate the hardware start-button press via the PLC interface.
+
+    Writes True to the Adaptio Start flag and then resets it to False after
+    a brief pulse, mirroring a physical momentary button press.
+
+    The PLC is used only as a *trigger* here; no PLC state is read or
+    asserted.
+    """
+    logger.info("Pressing hardware start button via PLC")
+    plc.write(var=_PLC_START_ADDR, value=True)
+    time.sleep(0.2)
+    plc.write(var=_PLC_START_ADDR, value=False)
+    logger.info("Start button pulse sent")
 
 
 # ---------------------------------------------------------------------------
@@ -242,16 +338,22 @@ def weld_data_set_setup_fixture(
 
 
 class TestManualWeldStart:
-    """HIL test suite for manual weld data handling (Gen 2, no PLC).
+    """HIL test suite covering the complete manual weld start use case (Gen 2).
 
-    These tests cover the weld data handling use case described in
-    sysfun-welddata-handling.md:
+    Test sequence (mirrors sysfun-welddata-handling.md and manual_weld_test.cc):
 
     1. Add weld process parameters (WPP) for each weld system (WS1/WS2).
-    2. Add a weld data set (WDS) that references the WPPs.
-    3. Select the weld data set so the system is configured for manual welding.
+    2. Add a weld data set (WDS) referencing both WPPs.
+    3. SelectWeldDataSet → Adaptio configures the weld systems:
+       - Arc state transitions immediately to "configured".
+       - Arc state transitions to "ready" once the power sources report
+         READY_TO_START (happens automatically with real hardware).
+    4. Operator presses the hardware start button (simulated by writing the PLC
+       Start flag) → arc state transitions to "starting".
 
-    The PLC is not involved; all communication uses the WebHMI WebSocket API.
+    WebHMI (AdaptioWebHmi) is used for all Adaptio interactions.
+    PLC data / state is NOT asserted; the PLC is only used to fire the start
+    button trigger.
     """
 
     # ------------------------------------------------------------------
@@ -500,3 +602,171 @@ class TestManualWeldStart:
         except TimeoutError:
             logger.exception("Timeout when testing non-existent WDS selection")
             pytest.fail("Timed out waiting for SelectWeldDataSetRsp (non-existent ID)")
+
+    # ------------------------------------------------------------------
+    # Arc state transition tests (steps 3 & 4 of the use case)
+    # ------------------------------------------------------------------
+
+    def test_arc_state_is_idle_initially(self, request: pytest.FixtureRequest) -> None:
+        """Before any WDS is selected the arc state is "idle".
+
+        Queries GetArcState without selecting a WDS and verifies the state
+        returned by Adaptio is "idle".  This is the baseline state from which
+        all subsequent transitions start.
+        """
+        logger.info("Verifying initial arc state is 'idle'")
+        state = _get_current_arc_state(request.config.WEB_HMI_URI)
+        assert state == "idle", f"Expected initial arc state 'idle', got: {state!r}"
+        logger.info("Initial arc state confirmed as 'idle'")
+
+    def test_select_weld_data_set_transitions_to_configured(
+        self,
+        request: pytest.FixtureRequest,
+        weld_data_set_setup: int,
+    ) -> None:
+        """Selecting a WDS causes the arc state to transition to "configured".
+
+        After SelectWeldDataSet Adaptio immediately configures both weld
+        systems with the parameters from the WDS and pushes an ArcState
+        update.  This test verifies that the arc state reaches "configured"
+        within a short timeout.
+
+        Depends on ``weld_data_set_setup`` to create and register the WDS
+        before the selection is attempted.
+        """
+        uri = request.config.WEB_HMI_URI
+        wds_id = weld_data_set_setup
+        logger.info(f"Selecting WDS id={wds_id} and verifying arc state → 'configured'")
+
+        # Select the weld data set
+        try:
+            response = _run_sync_in_thread(
+                _run_adaptio_send,
+                uri,
+                request_name="SelectWeldDataSet",
+                response_name="SelectWeldDataSetRsp",
+                payload={"id": wds_id},
+                timeout=10,
+            )
+            result = _extract_result(response)
+            assert result == "ok", f"SelectWeldDataSet failed: {result!r}"
+            logger.info(f"WDS id={wds_id} selected successfully")
+        except TimeoutError:
+            pytest.fail("Timed out waiting for SelectWeldDataSetRsp")
+
+        # Arc state must reach "configured" quickly after selection
+        try:
+            state = _wait_for_arc_state(uri, expected_state="configured", timeout_s=10.0)
+            logger.info(f"Arc state reached: {state!r}")
+        except TimeoutError as exc:
+            pytest.fail(str(exc))
+
+    def test_complete_weld_start_sequence(
+        self,
+        request: pytest.FixtureRequest,
+        setup_plc: PlcJsonRpc,
+    ) -> None:
+        """Complete weld start sequence: WPP → WDS → CONFIGURED → READY → STARTING.
+
+        Executes the full use-case end-to-end:
+
+        1. Add WPP for WS1 (25 V / 200 A) and WS2 (28 V / 180 A).
+        2. Add a WDS referencing both WPPs.
+        3. Select the WDS:
+           - Arc state must reach "configured" (Adaptio configures the weld
+             systems with the WDS parameters).
+           - Arc state must reach "ready" (the real power sources report
+             READY_TO_START, which happens automatically with live hardware).
+        4. Send a hardware start-button pulse via the PLC Start flag:
+           - Arc state must reach "starting" (Adaptio issues a START command
+             to the weld systems).
+
+        PLC data / state is NOT asserted at any point.  The PLC is used only
+        to trigger the start-button signal.
+
+        Timeouts:
+            - CONFIGURED: 10 s (immediate after SelectWeldDataSet)
+            - READY: 60 s (power sources need time to configure and confirm)
+            - STARTING: 10 s (immediate after start-button pulse)
+        """
+        uri = request.config.WEB_HMI_URI
+        logger.info("Starting complete weld start sequence test")
+
+        try:
+            # ---- Step 1: Add WPP for WS1 ----------------------------------------
+            logger.info("Step 1: Adding WPP for WS1")
+            wpp1_rsp = _run_sync_in_thread(
+                _run_adaptio_send,
+                uri,
+                request_name="AddWeldProcessParameters",
+                response_name="AddWeldProcessParametersRsp",
+                payload=WPP_DEFAULT_WS1,
+                timeout=10,
+            )
+            assert _extract_result(wpp1_rsp) == "ok", "Failed to add WPP for WS1"
+            wpp1_id = _extract_id(wpp1_rsp)
+            logger.info(f"WPP WS1 added with id={wpp1_id}")
+
+            # ---- Step 1b: Add WPP for WS2 ---------------------------------------
+            logger.info("Step 1b: Adding WPP for WS2")
+            wpp2_rsp = _run_sync_in_thread(
+                _run_adaptio_send,
+                uri,
+                request_name="AddWeldProcessParameters",
+                response_name="AddWeldProcessParametersRsp",
+                payload=WPP_DEFAULT_WS2,
+                timeout=10,
+            )
+            assert _extract_result(wpp2_rsp) == "ok", "Failed to add WPP for WS2"
+            wpp2_id = _extract_id(wpp2_rsp)
+            logger.info(f"WPP WS2 added with id={wpp2_id}")
+
+            # ---- Step 2: Add WDS ------------------------------------------------
+            logger.info("Step 2: Adding weld data set")
+            wds_rsp = _run_sync_in_thread(
+                _run_adaptio_send,
+                uri,
+                request_name="AddWeldDataSet",
+                response_name="AddWeldDataSetRsp",
+                payload={"name": "ManualWeld", "ws1WppId": wpp1_id, "ws2WppId": wpp2_id},
+                timeout=10,
+            )
+            assert _extract_result(wds_rsp) == "ok", "Failed to add weld data set"
+            wds_id = _extract_id(wds_rsp)
+            logger.info(f"WDS added with id={wds_id}")
+
+            # ---- Step 3a: Select WDS → CONFIGURED --------------------------------
+            logger.info("Step 3a: Selecting WDS")
+            sel_rsp = _run_sync_in_thread(
+                _run_adaptio_send,
+                uri,
+                request_name="SelectWeldDataSet",
+                response_name="SelectWeldDataSetRsp",
+                payload={"id": wds_id},
+                timeout=10,
+            )
+            assert _extract_result(sel_rsp) == "ok", "SelectWeldDataSet failed"
+            logger.info("WDS selected; waiting for arc state 'configured'")
+
+            _wait_for_arc_state(uri, expected_state="configured", timeout_s=10.0)
+            logger.info("Arc state reached 'configured' ✓")
+
+            # ---- Step 3b: Wait for READY (power sources confirm) ----------------
+            logger.info("Step 3b: Waiting for arc state 'ready' (power sources READY_TO_START)")
+            _wait_for_arc_state(uri, expected_state="ready", timeout_s=60.0)
+            logger.info("Arc state reached 'ready' ✓")
+
+            # ---- Step 4: Start-button pulse → STARTING --------------------------
+            logger.info("Step 4: Pressing hardware start button via PLC")
+            _press_start_button(setup_plc)
+
+            _wait_for_arc_state(uri, expected_state="starting", timeout_s=10.0)
+            logger.info("Arc state reached 'starting' ✓ — arc start sequence complete")
+
+        except TimeoutError as exc:
+            pytest.fail(f"Arc state transition timed out: {exc}")
+        except AssertionError:
+            raise
+        except Exception:
+            logger.exception("Unexpected error in complete weld start sequence")
+            raise
