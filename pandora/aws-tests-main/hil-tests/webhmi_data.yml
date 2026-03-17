@@ -1,3 +1,36 @@
+### Weld Process Parameters ###
+weld_process_parameters:
+ ws1:
+  name: ManualWS1
+  method: dc
+  regulation_type: cc
+  start_adjust: 10
+  start_type: scratch
+  voltage: 25.0
+  current: 200.0
+  wire_speed: 15.0
+  ice_wire_speed: 0.0
+  ac_frequency: 60.0
+  ac_offset: 1.2
+  ac_phase_shift: 0.5
+  crater_fill_time: 2.0
+  burn_back_time: 1.0
+ ws2:
+  name: ManualWS2
+  method: dc
+  regulation_type: cc
+  start_adjust: 10
+  start_type: direct
+  voltage: 28.0
+  current: 180.0
+  wire_speed: 14.0
+  ice_wire_speed: 0.0
+  ac_frequency: 60.0
+  ac_offset: 1.2
+  ac_phase_shift: 0.5
+  crater_fill_time: 2.0
+  burn_back_time: 1.0
+
 ### Laser To Torch Calibration ###
 laser_to_torch_calibration:
  stickout: 11
