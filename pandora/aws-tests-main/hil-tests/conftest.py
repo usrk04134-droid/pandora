@@ -1136,6 +1136,197 @@ def set_joint_geometry(
         return False
 
 
+def get_weld_process_parameters_config(weld_system: str = "ws1") -> dict:
+    """
+    Parse weld process parameters configuration from YAML file.
+
+    Args:
+        weld_system: Weld system identifier ("ws1" or "ws2")
+
+    Returns:
+        dict: Weld process parameters with keys expected by add_weld_process_parameters()
+
+    Raises:
+        ValueError: If weld process parameters configuration not found in YAML file
+    """
+    with open(yaml_file_path, "r") as file:
+        data = yaml.safe_load(file)
+
+    yaml_key = None
+    for key in data.keys():
+        if key.startswith(f"weld_process_parameters_{weld_system}"):
+            yaml_key = key
+            break
+
+    if yaml_key is None:
+        raise ValueError(f"Weld process parameters for '{weld_system}' not found in {yaml_file_path}")
+
+    config = data[yaml_key]
+    return {
+        "name": config["name"],
+        "method": config["method"],
+        "regulationType": config["regulationType"],
+        "startAdjust": config["startAdjust"],
+        "startType": config["startType"],
+        "voltage": float(config["voltage"]),
+        "current": float(config["current"]),
+        "wireSpeed": float(config["wireSpeed"]),
+        "iceWireSpeed": float(config["iceWireSpeed"]),
+        "acFrequency": float(config["acFrequency"]),
+        "acOffset": float(config["acOffset"]),
+        "acPhaseShift": float(config["acPhaseShift"]),
+        "craterFillTime": float(config["craterFillTime"]),
+        "burnBackTime": float(config["burnBackTime"]),
+    }
+
+
+def add_weld_process_parameters(web_hmi: AdaptioWebHmi, **kwargs) -> bool:
+    """Add weld process parameters via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        **kwargs: Weld process parameter fields (name, method, regulationType, etc.)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        response = web_hmi.add_weld_process_parameters(**kwargs)
+        logger.debug(f"Received response: {response}")
+        result = getattr(response, "result", None) or response.payload.get("result")
+        if response and result == "ok":
+            logger.info(f"Successfully added weld process parameters: {kwargs.get('name', '')}")
+            return True
+        else:
+            logger.warning(f"Failed to add weld process parameters: {kwargs.get('name', '')}")
+            return False
+    except TimeoutError:
+        logger.exception("Failed to add weld process parameters")
+        return False
+
+
+def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int) -> bool:
+    """Add a weld data set via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        name: Name of the weld data set
+        ws1_wpp_id: Weld system 1 weld process parameter ID
+        ws2_wpp_id: Weld system 2 weld process parameter ID
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        response = web_hmi.add_weld_data_set(name=name, ws1WppId=ws1_wpp_id, ws2WppId=ws2_wpp_id)
+        logger.debug(f"Received response: {response}")
+        result = getattr(response, "result", None) or response.payload.get("result")
+        if response and result == "ok":
+            logger.info(f"Successfully added weld data set: {name}")
+            return True
+        else:
+            logger.warning(f"Failed to add weld data set: {name}")
+            return False
+    except TimeoutError:
+        logger.exception("Failed to add weld data set")
+        return False
+
+
+def select_weld_data_set(web_hmi: AdaptioWebHmi, weld_data_set_id: int) -> bool:
+    """Select a weld data set via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        weld_data_set_id: ID of the weld data set to select
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        response = web_hmi.select_weld_data_set(id=weld_data_set_id)
+        logger.debug(f"Received response: {response}")
+        result = getattr(response, "result", None) or response.payload.get("result")
+        if response and result == "ok":
+            logger.info(f"Successfully selected weld data set: {weld_data_set_id}")
+            return True
+        else:
+            logger.warning(f"Failed to select weld data set: {weld_data_set_id}")
+            return False
+    except TimeoutError:
+        logger.exception("Failed to select weld data set")
+        return False
+
+
+def get_weld_data_sets(web_hmi: AdaptioWebHmi) -> list | None:
+    """Get all weld data sets via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+
+    Returns:
+        List of weld data sets if successful, None otherwise
+    """
+    try:
+        response = web_hmi.send_and_receive_message(
+            condition=None,
+            request_name="GetWeldDataSets",
+            response_name="GetWeldDataSetsRsp",
+            payload={},
+        )
+        logger.debug(f"Received response: {response}")
+        return response.payload if response else None
+    except TimeoutError:
+        logger.exception("Failed to get weld data sets")
+        return None
+
+
+def subscribe_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
+    """Subscribe to arc state updates and receive the initial state.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+
+    Returns:
+        Initial arc state string if successful, None otherwise
+    """
+    try:
+        response = web_hmi.send_and_receive_message(
+            condition=None,
+            request_name="SubscribeArcState",
+            response_name="ArcState",
+            payload={},
+        )
+        logger.debug(f"Received ArcState response: {response}")
+        if response:
+            return response.payload.get("state")
+        return None
+    except TimeoutError:
+        logger.exception("Failed to subscribe to arc state")
+        return None
+
+
+def receive_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
+    """Receive the next arc state update.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+
+    Returns:
+        Arc state string if received, None otherwise
+    """
+    try:
+        from testzilla.adaptio_web_hmi.adaptio_web_hmi import create_name_condition
+        condition = create_name_condition(name="ArcState")
+        response = web_hmi.receive_message(condition=condition)
+        logger.debug(f"Received ArcState: {response}")
+        if response:
+            return response.payload.get("state")
+        return None
+    except TimeoutError:
+        logger.exception("Timed out waiting for arc state update")
+        return None
+
+
 @pytest.fixture(name="joint_type")
 def joint_type_fixture(request: pytest.FixtureRequest) -> str:
     """Fixture to provide joint type configuration.
