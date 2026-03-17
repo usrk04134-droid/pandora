@@ -1270,7 +1270,9 @@ def get_weld_data_sets(web_hmi: AdaptioWebHmi) -> list | None:
             payload={},
         )
         logger.debug(f"Received response: {response}")
-        return response.payload if response else None
+        if response and isinstance(response.payload, list):
+            return response.payload
+        return None
     except Exception:
         logger.exception("Failed to get weld data sets")
         return None
@@ -1293,9 +1295,9 @@ def get_weld_process_parameters(web_hmi: AdaptioWebHmi) -> list | None:
             payload={},
         )
         logger.debug(f"Received GetWeldProcessParameters response: {response}")
-        if response and response.payload:
+        if response and isinstance(response.payload, list):
             return response.payload
-        return []
+        return None
     except Exception:
         logger.exception("Failed to get weld process parameters")
         return None
