@@ -1363,16 +1363,81 @@ def remove_weld_process_parameters(web_hmi: AdaptioWebHmi, wpp_id: int) -> bool:
         return False
 
 
-def clean_weld_data(web_hmi: AdaptioWebHmi) -> None:
-    """Remove all existing weld data sets and weld process parameters.
+def get_weld_programs(web_hmi: AdaptioWebHmi) -> list | None:
+    """Get all weld programs via WebHMI.
 
-    WDS must be removed before WPP because the adaptio module prevents
-    removal of WPP that are referenced by a WDS.
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+
+    Returns:
+        List of weld program dicts if successful, None otherwise
+    """
+    try:
+        response = web_hmi.send_and_receive_message(
+            condition=None,
+            request_name="GetWeldPrograms",
+            response_name="GetWeldProgramsRsp",
+            payload={},
+        )
+        logger.debug(f"Received GetWeldPrograms response: {response}")
+        if response and isinstance(response.payload, list):
+            return response.payload
+        return None
+    except Exception:
+        logger.exception("Failed to get weld programs")
+        return None
+
+
+def remove_weld_program(web_hmi: AdaptioWebHmi, program_id: int) -> bool:
+    """Remove a weld program via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        program_id: ID of the weld program to remove
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        response = web_hmi.send_and_receive_message(
+            condition=None,
+            request_name="RemoveWeldProgram",
+            response_name="RemoveWeldProgramRsp",
+            payload={"id": program_id},
+        )
+        logger.debug(f"Received RemoveWeldProgram response: {response}")
+        result = getattr(response, "result", None) or response.payload.get("result")
+        if response and result == "ok":
+            logger.info(f"Successfully removed weld program: {program_id}")
+            return True
+        else:
+            logger.warning(f"Failed to remove weld program: {program_id}")
+            return False
+    except Exception:
+        logger.exception(f"Failed to remove weld program: {program_id}")
+        return False
+
+
+def clean_weld_data(web_hmi: AdaptioWebHmi) -> None:
+    """Remove all existing weld programs, weld data sets, and weld process parameters.
+
+    Removal order matters due to referential constraints in the adaptio module:
+      1. Weld programs (reference WDS)
+      2. Weld data sets (reference WPP)
+      3. Weld process parameters
 
     Args:
         web_hmi: AdaptioWebHmi instance for communication
     """
-    # Remove all weld data sets first
+    # Remove all weld programs first (they reference WDS)
+    weld_programs = get_weld_programs(web_hmi)
+    if weld_programs:
+        for prog in weld_programs:
+            prog_id = prog.get("id") if isinstance(prog, dict) else None
+            if prog_id is not None:
+                remove_weld_program(web_hmi, prog_id)
+
+    # Then remove all weld data sets (they reference WPP)
     weld_data_sets = get_weld_data_sets(web_hmi)
     if weld_data_sets:
         for wds in weld_data_sets:
@@ -1380,7 +1445,7 @@ def clean_weld_data(web_hmi: AdaptioWebHmi) -> None:
             if wds_id is not None:
                 remove_weld_data_set(web_hmi, wds_id)
 
-    # Then remove all weld process parameters
+    # Finally remove all weld process parameters
     weld_process_params = get_weld_process_parameters(web_hmi)
     if weld_process_params:
         for wpp in weld_process_params:
