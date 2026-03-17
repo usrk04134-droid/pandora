@@ -1276,6 +1276,117 @@ def get_weld_data_sets(web_hmi: AdaptioWebHmi) -> list | None:
         return None
 
 
+def get_weld_process_parameters(web_hmi: AdaptioWebHmi) -> list | None:
+    """Get all weld process parameters via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+
+    Returns:
+        List of weld process parameter dicts if successful, None otherwise
+    """
+    try:
+        response = web_hmi.send_and_receive_message(
+            condition=None,
+            request_name="GetWeldProcessParameters",
+            response_name="GetWeldProcessParametersRsp",
+            payload={},
+        )
+        logger.debug(f"Received GetWeldProcessParameters response: {response}")
+        if response and response.payload:
+            return response.payload
+        return []
+    except Exception:
+        logger.exception("Failed to get weld process parameters")
+        return None
+
+
+def remove_weld_data_set(web_hmi: AdaptioWebHmi, wds_id: int) -> bool:
+    """Remove a weld data set via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        wds_id: ID of the weld data set to remove
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        response = web_hmi.send_and_receive_message(
+            condition=None,
+            request_name="RemoveWeldDataSet",
+            response_name="RemoveWeldDataSetRsp",
+            payload={"id": wds_id},
+        )
+        logger.debug(f"Received RemoveWeldDataSet response: {response}")
+        result = getattr(response, "result", None) or response.payload.get("result")
+        if response and result == "ok":
+            logger.info(f"Successfully removed weld data set: {wds_id}")
+            return True
+        else:
+            logger.warning(f"Failed to remove weld data set: {wds_id}")
+            return False
+    except Exception:
+        logger.exception(f"Failed to remove weld data set: {wds_id}")
+        return False
+
+
+def remove_weld_process_parameters(web_hmi: AdaptioWebHmi, wpp_id: int) -> bool:
+    """Remove weld process parameters via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        wpp_id: ID of the weld process parameters to remove
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        response = web_hmi.send_and_receive_message(
+            condition=None,
+            request_name="RemoveWeldProcessParameters",
+            response_name="RemoveWeldProcessParametersRsp",
+            payload={"id": wpp_id},
+        )
+        logger.debug(f"Received RemoveWeldProcessParameters response: {response}")
+        result = getattr(response, "result", None) or response.payload.get("result")
+        if response and result == "ok":
+            logger.info(f"Successfully removed weld process parameters: {wpp_id}")
+            return True
+        else:
+            logger.warning(f"Failed to remove weld process parameters: {wpp_id}")
+            return False
+    except Exception:
+        logger.exception(f"Failed to remove weld process parameters: {wpp_id}")
+        return False
+
+
+def clean_weld_data(web_hmi: AdaptioWebHmi) -> None:
+    """Remove all existing weld data sets and weld process parameters.
+
+    WDS must be removed before WPP because the adaptio module prevents
+    removal of WPP that are referenced by a WDS.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+    """
+    # Remove all weld data sets first
+    weld_data_sets = get_weld_data_sets(web_hmi)
+    if weld_data_sets:
+        for wds in weld_data_sets:
+            wds_id = wds.get("id") if isinstance(wds, dict) else None
+            if wds_id is not None:
+                remove_weld_data_set(web_hmi, wds_id)
+
+    # Then remove all weld process parameters
+    weld_process_params = get_weld_process_parameters(web_hmi)
+    if weld_process_params:
+        for wpp in weld_process_params:
+            wpp_id = wpp.get("id") if isinstance(wpp, dict) else None
+            if wpp_id is not None:
+                remove_weld_process_parameters(web_hmi, wpp_id)
+
+
 def subscribe_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
     """Subscribe to arc state updates and receive the initial state.
 

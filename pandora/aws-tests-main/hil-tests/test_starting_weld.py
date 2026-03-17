@@ -16,6 +16,7 @@ from loguru import logger
 from conftest import (
     add_weld_data_set,
     add_weld_process_parameters,
+    clean_weld_data,
     get_weld_data_sets,
     get_weld_process_parameters_config,
     receive_arc_state,
@@ -39,8 +40,12 @@ def weld_process_parameters_setup_fixture(web_hmi: AdaptioWebHmi):
     """Add weld process parameters for both weld systems.
 
     Reads WPP data from webhmi_data.yml and adds parameters for WS1 and WS2.
+    Removes any existing weld data sets and weld process parameters first
+    to avoid name conflicts from previous test runs.
     Skips tests if the adaptio module is not reachable.
     """
+    clean_weld_data(web_hmi)
+
     ws1_config = get_weld_process_parameters_config("ws1")
     ws2_config = get_weld_process_parameters_config("ws2")
 
@@ -69,7 +74,10 @@ class TestStartingWeld:
 
         Verifies that WPP can be successfully added for WS1 and WS2
         using the parameters defined in webhmi_data.yml.
+        Cleans up existing data first to avoid name conflicts.
         """
+        clean_weld_data(web_hmi)
+
         ws1_config = get_weld_process_parameters_config("ws1")
         ws2_config = get_weld_process_parameters_config("ws2")
 
