@@ -17,8 +17,9 @@ from conftest import (
     add_weld_data_set,
     add_weld_process_parameters,
     clean_weld_data,
+    ensure_weld_data_set,
+    ensure_weld_process_parameters,
     get_weld_data_sets,
-    get_weld_process_parameters,
     get_weld_process_parameters_config,
     receive_arc_state,
     select_weld_data_set,
@@ -26,54 +27,6 @@ from conftest import (
 )
 from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi
 from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
-
-
-def _find_wpp_ids(web_hmi: AdaptioWebHmi, ws1_name: str, ws2_name: str) -> dict | None:
-    """Query the device for actual WPP IDs by name.
-
-    After adding weld process parameters, their database IDs are auto-incremented
-    and cannot be assumed to be 1 and 2. This helper queries the device for the
-    actual IDs.
-
-    Returns:
-        dict with 'ws1_wpp_id' and 'ws2_wpp_id', or None if not found
-    """
-    wpp_list = get_weld_process_parameters(web_hmi)
-    if not wpp_list:
-        return None
-
-    ws1_wpp_id = None
-    ws2_wpp_id = None
-    for wpp in wpp_list:
-        if isinstance(wpp, dict):
-            if wpp.get("name") == ws1_name:
-                ws1_wpp_id = wpp.get("id")
-            elif wpp.get("name") == ws2_name:
-                ws2_wpp_id = wpp.get("id")
-
-    if ws1_wpp_id is not None and ws2_wpp_id is not None:
-        return {"ws1_wpp_id": ws1_wpp_id, "ws2_wpp_id": ws2_wpp_id}
-    return None
-
-
-def _find_wds_id(web_hmi: AdaptioWebHmi, wds_name: str) -> int | None:
-    """Query the device for actual WDS ID by name.
-
-    After adding a weld data set, its database ID is auto-incremented
-    and cannot be assumed to be 1. This helper queries the device for
-    the actual ID.
-
-    Returns:
-        WDS ID, or None if not found
-    """
-    wds_list = get_weld_data_sets(web_hmi)
-    if not wds_list:
-        return None
-
-    for wds in wds_list:
-        if isinstance(wds, dict) and wds.get("name") == wds_name:
-            return wds.get("id")
-    return None
 
 
 @pytest.fixture(name="web_hmi")
@@ -86,56 +39,55 @@ def web_hmi_fixture(request: pytest.FixtureRequest):
 
 @pytest.fixture(name="weld_process_parameters_setup")
 def weld_process_parameters_setup_fixture(web_hmi: AdaptioWebHmi):
-    """Add weld process parameters for both weld systems.
+    """Ensure weld process parameters exist for both weld systems.
 
-    Reads WPP data from webhmi_data.yml and adds parameters for WS1 and WS2.
-    Removes any existing weld data sets and weld process parameters first
-    to avoid name conflicts from previous test runs.
-    Skips tests if the adaptio module is not reachable.
+    Uses an upsert pattern to avoid unnecessary deletion and re-creation
+    of WPP entries, which would cause SQLite auto-increment IDs to grow.
+    If WPP with the expected names already exist and match the desired config,
+    they are reused. If they exist but differ, they are updated in place.
+    Only adds new entries if they don't exist yet.
 
     Returns:
         dict with 'ws1_wpp_id' and 'ws2_wpp_id' (actual database IDs)
     """
-    clean_weld_data(web_hmi)
-
     ws1_config = get_weld_process_parameters_config("ws1")
     ws2_config = get_weld_process_parameters_config("ws2")
 
-    if not add_weld_process_parameters(web_hmi, **ws1_config):
-        pytest.skip("Skipping test: failed to add weld process parameters for WS1")
-    if not add_weld_process_parameters(web_hmi, **ws2_config):
-        pytest.skip("Skipping test: failed to add weld process parameters for WS2")
+    ws1_wpp_id = ensure_weld_process_parameters(web_hmi, **ws1_config)
+    if ws1_wpp_id is None:
+        pytest.skip("Skipping test: failed to ensure weld process parameters for WS1")
 
-    wpp_ids = _find_wpp_ids(web_hmi, ws1_config["name"], ws2_config["name"])
-    if wpp_ids is None:
-        pytest.skip("Skipping test: could not retrieve WPP IDs after adding")
+    ws2_wpp_id = ensure_weld_process_parameters(web_hmi, **ws2_config)
+    if ws2_wpp_id is None:
+        pytest.skip("Skipping test: failed to ensure weld process parameters for WS2")
 
+    wpp_ids = {"ws1_wpp_id": ws1_wpp_id, "ws2_wpp_id": ws2_wpp_id}
     logger.info(f"WPP IDs: ws1={wpp_ids['ws1_wpp_id']}, ws2={wpp_ids['ws2_wpp_id']}")
     return wpp_ids
 
 
 @pytest.fixture(name="weld_data_set_setup")
 def weld_data_set_setup_fixture(web_hmi: AdaptioWebHmi, weld_process_parameters_setup):
-    """Add a weld data set linking WS1 and WS2 weld process parameters.
+    """Ensure a weld data set exists linking WS1 and WS2 weld process parameters.
 
-    Uses the actual WPP IDs from the device (not hardcoded) since database IDs
-    auto-increment across test runs.
+    Uses an upsert pattern to avoid unnecessary deletion and re-creation
+    of WDS entries, which would cause SQLite auto-increment IDs to grow.
+    If a WDS with the expected name already exists and references the correct
+    WPP IDs, it is reused. If it exists but differs, it is updated in place.
+    Only adds a new entry if it doesn't exist yet.
 
     Returns:
         dict with 'wds_id', 'ws1_wpp_id', and 'ws2_wpp_id' (actual database IDs)
     """
     wpp_ids = weld_process_parameters_setup
-    if not add_weld_data_set(
+    wds_id = ensure_weld_data_set(
         web_hmi,
         name="ManualWeld",
         ws1_wpp_id=wpp_ids["ws1_wpp_id"],
         ws2_wpp_id=wpp_ids["ws2_wpp_id"],
-    ):
-        pytest.skip("Skipping test: failed to add weld data set")
-
-    wds_id = _find_wds_id(web_hmi, "ManualWeld")
+    )
     if wds_id is None:
-        pytest.skip("Skipping test: could not retrieve WDS ID after adding")
+        pytest.skip("Skipping test: failed to ensure weld data set")
 
     logger.info(f"WDS ID: {wds_id}")
     return {"wds_id": wds_id, **wpp_ids}

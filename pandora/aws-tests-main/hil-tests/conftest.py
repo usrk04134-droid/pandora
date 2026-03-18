@@ -1228,6 +1228,186 @@ def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wp
         return False
 
 
+def update_weld_process_parameters(web_hmi: AdaptioWebHmi, wpp_id: int, **kwargs) -> bool:
+    """Update existing weld process parameters via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        wpp_id: ID of the weld process parameters to update
+        **kwargs: Weld process parameter fields (name, method, regulationType, etc.)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        payload = {"id": wpp_id, **kwargs}
+        response = web_hmi.send_and_receive_message(
+            condition=None,
+            request_name="UpdateWeldProcessParameters",
+            response_name="UpdateWeldProcessParametersRsp",
+            payload=payload,
+        )
+        logger.debug(f"Received UpdateWeldProcessParameters response: {response}")
+        result = getattr(response, "result", None) or response.payload.get("result")
+        if response and result == "ok":
+            logger.info(f"Successfully updated weld process parameters: {kwargs.get('name', '')} (id={wpp_id})")
+            return True
+        else:
+            logger.warning(f"Failed to update weld process parameters: {kwargs.get('name', '')} (id={wpp_id})")
+            return False
+    except Exception:
+        logger.exception("Failed to update weld process parameters")
+        return False
+
+
+def update_weld_data_set(
+    web_hmi: AdaptioWebHmi, wds_id: int, name: str, ws1_wpp_id: int, ws2_wpp_id: int
+) -> bool:
+    """Update an existing weld data set via WebHMI.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        wds_id: ID of the weld data set to update
+        name: Name of the weld data set
+        ws1_wpp_id: Weld system 1 weld process parameter ID
+        ws2_wpp_id: Weld system 2 weld process parameter ID
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        payload = {"id": wds_id, "name": name, "ws1WppId": ws1_wpp_id, "ws2WppId": ws2_wpp_id}
+        response = web_hmi.send_and_receive_message(
+            condition=None,
+            request_name="UpdateWeldDataSet",
+            response_name="UpdateWeldDataSetRsp",
+            payload=payload,
+        )
+        logger.debug(f"Received UpdateWeldDataSet response: {response}")
+        result = getattr(response, "result", None) or response.payload.get("result")
+        if response and result == "ok":
+            logger.info(f"Successfully updated weld data set: {name} (id={wds_id})")
+            return True
+        else:
+            logger.warning(f"Failed to update weld data set: {name} (id={wds_id})")
+            return False
+    except Exception:
+        logger.exception("Failed to update weld data set")
+        return False
+
+
+def _wpp_config_matches(existing_wpp: dict, desired_config: dict) -> bool:
+    """Check if existing WPP matches the desired configuration (ignoring ID).
+
+    Compares all fields in desired_config against the existing WPP dict.
+    Float values are compared with tolerance to handle floating point differences.
+
+    Args:
+        existing_wpp: Existing WPP dict from GetWeldProcessParameters
+        desired_config: Desired WPP configuration dict
+
+    Returns:
+        True if all fields match, False otherwise
+    """
+    for key, value in desired_config.items():
+        existing_value = existing_wpp.get(key)
+        if isinstance(value, float) and isinstance(existing_value, (int, float)):
+            if abs(float(existing_value) - value) > 1e-6:
+                return False
+        elif existing_value != value:
+            return False
+    return True
+
+
+def ensure_weld_process_parameters(web_hmi: AdaptioWebHmi, **config) -> int | None:
+    """Ensure weld process parameters exist with the given configuration.
+
+    Uses an upsert pattern to avoid unnecessary deletion and re-creation:
+      - If WPP with the given name already exists and config matches, reuse it
+      - If WPP exists but config differs, update it
+      - If WPP doesn't exist, add it
+
+    This prevents SQLite auto-increment IDs from growing across test runs.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        **config: Weld process parameter fields (name, method, regulationType, etc.)
+
+    Returns:
+        WPP database ID if successful, None otherwise
+    """
+    name = config.get("name", "")
+    wpp_list = get_weld_process_parameters(web_hmi)
+
+    if wpp_list:
+        for wpp in wpp_list:
+            if isinstance(wpp, dict) and wpp.get("name") == name:
+                wpp_id = wpp.get("id")
+                if _wpp_config_matches(wpp, config):
+                    logger.info(f"WPP '{name}' already exists with matching config (id={wpp_id})")
+                    return wpp_id
+                if update_weld_process_parameters(web_hmi, wpp_id, **config):
+                    logger.info(f"Updated WPP '{name}' (id={wpp_id})")
+                    return wpp_id
+                logger.warning(f"Failed to update WPP '{name}' (id={wpp_id})")
+                return None
+
+    # Not found, add new
+    if add_weld_process_parameters(web_hmi, **config):
+        updated_list = get_weld_process_parameters(web_hmi)
+        if updated_list:
+            for wpp in updated_list:
+                if isinstance(wpp, dict) and wpp.get("name") == name:
+                    return wpp.get("id")
+    return None
+
+
+def ensure_weld_data_set(
+    web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int
+) -> int | None:
+    """Ensure a weld data set exists with the given configuration.
+
+    Uses an upsert pattern to avoid unnecessary deletion and re-creation:
+      - If WDS with the given name already exists and WPP IDs match, reuse it
+      - If WDS exists but WPP IDs differ, update it
+      - If WDS doesn't exist, add it
+
+    This prevents SQLite auto-increment IDs from growing across test runs.
+
+    Args:
+        web_hmi: AdaptioWebHmi instance for communication
+        name: Name of the weld data set
+        ws1_wpp_id: Weld system 1 weld process parameter ID
+        ws2_wpp_id: Weld system 2 weld process parameter ID
+
+    Returns:
+        WDS database ID if successful, None otherwise
+    """
+    wds_list = get_weld_data_sets(web_hmi)
+
+    if wds_list:
+        for wds in wds_list:
+            if isinstance(wds, dict) and wds.get("name") == name:
+                wds_id = wds.get("id")
+                if wds.get("ws1WppId") == ws1_wpp_id and wds.get("ws2WppId") == ws2_wpp_id:
+                    logger.info(f"WDS '{name}' already exists with matching config (id={wds_id})")
+                    return wds_id
+                if update_weld_data_set(web_hmi, wds_id, name, ws1_wpp_id, ws2_wpp_id):
+                    logger.info(f"Updated WDS '{name}' (id={wds_id})")
+                    return wds_id
+                logger.warning(f"Failed to update WDS '{name}' (id={wds_id})")
+                return None
+
+    # Not found, add new
+    if add_weld_data_set(web_hmi, name=name, ws1_wpp_id=ws1_wpp_id, ws2_wpp_id=ws2_wpp_id):
+        updated_list = get_weld_data_sets(web_hmi)
+        if updated_list:
+            for wds in updated_list:
+                if isinstance(wds, dict) and wds.get("name") == name:
+                    return wds.get("id")
+    return None
+
+
 def select_weld_data_set(web_hmi: AdaptioWebHmi, weld_data_set_id: int) -> bool:
     """Select a weld data set via WebHMI.
 
