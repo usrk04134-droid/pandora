@@ -1296,6 +1296,9 @@ def update_weld_data_set(
         return False
 
 
+_FLOAT_COMPARISON_TOLERANCE = 1e-6
+
+
 def _wpp_config_matches(existing_wpp: dict, desired_config: dict) -> bool:
     """Check if existing WPP matches the desired configuration (ignoring ID).
 
@@ -1312,7 +1315,7 @@ def _wpp_config_matches(existing_wpp: dict, desired_config: dict) -> bool:
     for key, value in desired_config.items():
         existing_value = existing_wpp.get(key)
         if isinstance(value, float) and isinstance(existing_value, (int, float)):
-            if abs(float(existing_value) - value) > 1e-6:
+            if abs(float(existing_value) - value) > _FLOAT_COMPARISON_TOLERANCE:
                 return False
         elif existing_value != value:
             return False
