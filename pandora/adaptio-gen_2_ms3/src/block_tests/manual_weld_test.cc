@@ -168,6 +168,160 @@ TEST_SUITE("ManualWeld") {
     // Voltage on power source 1 should now be WPP_DEFAULT_WS1 voltage (25.0) + 0.5 = 25.5
     CHECK_EQ(mfx.Ctrl().Mock()->power_source_1_output.get_voltage(), 25.5f);
   }
+
+  TEST_CASE("starting_state_rolls_back_to_configured_on_weld_system_error") {
+    MultiFixture mfx;
+
+    auto sub_msg = web_hmi::CreateMessage("SubscribeArcState", std::nullopt, nlohmann::json{});
+    mfx.Main().WebHmiIn()->DispatchMessage(std::move(sub_msg));
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume IDLE
+
+    SetupAndSelectWds(mfx);
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume CONFIGURED
+
+    MakeReady(mfx);
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume READY
+
+    PressStart(mfx);
+    auto state_msg = ReceiveJsonByName(mfx.Main(), "ArcState");
+    CHECK_EQ(state_msg.at("payload").at("state"), "starting");
+
+    // Power source 1 reports ERROR instead of ARCING → CONFIGURED (not all ready)
+    DispatchWeldSystemStateChange(mfx.Main(), weld_system::WeldSystemId::ID1,
+                                  common::msg::weld_system::OnWeldSystemStateChange::State::ERROR);
+    mfx.PlcDataUpdate();
+
+    state_msg = ReceiveJsonByName(mfx.Main(), "ArcState");
+    CHECK_EQ(state_msg.at("payload").at("state"), "configured");
+  }
+
+  TEST_CASE("starting_state_rolls_back_to_ready_when_all_sources_remain_ready") {
+    MultiFixture mfx;
+
+    auto sub_msg = web_hmi::CreateMessage("SubscribeArcState", std::nullopt, nlohmann::json{});
+    mfx.Main().WebHmiIn()->DispatchMessage(std::move(sub_msg));
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume IDLE
+
+    SetupAndSelectWds(mfx);
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume CONFIGURED
+
+    MakeReady(mfx);
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume READY
+
+    PressStart(mfx);
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume STARTING
+
+    // WS1 immediately reports READY_TO_START (start rejected by PLC with both sources ready)
+    // → both sources READY_TO_START → rolls back to READY
+    DispatchWeldSystemStateChange(mfx.Main(), weld_system::WeldSystemId::ID1,
+                                  common::msg::weld_system::OnWeldSystemStateChange::State::READY_TO_START);
+    mfx.PlcDataUpdate();
+
+    auto state_msg = ReceiveJsonByName(mfx.Main(), "ArcState");
+    CHECK_EQ(state_msg.at("payload").at("state"), "ready");
+  }
+
+  TEST_CASE("starting_state_stays_during_in_welding_sequence") {
+    MultiFixture mfx;
+
+    auto sub_msg = web_hmi::CreateMessage("SubscribeArcState", std::nullopt, nlohmann::json{});
+    mfx.Main().WebHmiIn()->DispatchMessage(std::move(sub_msg));
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume IDLE
+
+    SetupAndSelectWds(mfx);
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume CONFIGURED
+
+    MakeReady(mfx);
+    ReceiveJsonByName(mfx.Main(), "ArcState");  // consume READY
+
+    PressStart(mfx);
+    auto state_msg = ReceiveJsonByName(mfx.Main(), "ArcState");
+    CHECK_EQ(state_msg.at("payload").at("state"), "starting");
+
+    // WS1 transitions through IN_WELDING_SEQUENCE (normal step before ARCING)
+    // → state machine must remain in STARTING, not roll back
+    DispatchWeldSystemStateChange(mfx.Main(), weld_system::WeldSystemId::ID1,
+                                  common::msg::weld_system::OnWeldSystemStateChange::State::IN_WELDING_SEQUENCE);
+    mfx.PlcDataUpdate();
+
+    // No ArcState change expected; STARTING should be preserved
+    auto no_state_change = OptionalReceiveJsonByName(mfx.Main(), "ArcState");
+    CHECK_FALSE(no_state_change.has_value());
+
+    // WS1 then reaches ARCING → ACTIVE
+    DispatchWeldSystemStateChange(mfx.Main(), weld_system::WeldSystemId::ID1,
+                                  common::msg::weld_system::OnWeldSystemStateChange::State::ARCING);
+    mfx.PlcDataUpdate();
+
+    state_msg = ReceiveJsonByName(mfx.Main(), "ArcState");
+    CHECK_EQ(state_msg.at("payload").at("state"), "active");
+  }
+
+  TEST_CASE("select_weld_data_set_rejected_while_starting") {
+    MultiFixture mfx;
+
+    SetupAndSelectWds(mfx);
+    MakeReady(mfx);
+    PressStart(mfx);
+
+    // Try to change the WDS while the start sequence is in progress
+    nlohmann::json select_payload = {
+        {"id", 1}
+    };
+    auto select_msg = web_hmi::CreateMessage("SelectWeldDataSet", std::nullopt, select_payload);
+    mfx.Main().WebHmiIn()->DispatchMessage(std::move(select_msg));
+
+    auto rsp = ReceiveJsonByName(mfx.Main(), "SelectWeldDataSetRsp");
+    CHECK_EQ(rsp.at("result"), "fail");
+  }
+
+  TEST_CASE("select_weld_data_set_rejected_while_active") {
+    MultiFixture mfx;
+
+    SetupAndSelectWds(mfx);
+    MakeReady(mfx);
+    PressStart(mfx);
+
+    DispatchWeldSystemStateChange(mfx.Main(), weld_system::WeldSystemId::ID1,
+                                  common::msg::weld_system::OnWeldSystemStateChange::State::ARCING);
+    mfx.PlcDataUpdate();
+
+    // Try to change the WDS while actively welding
+    nlohmann::json select_payload = {
+        {"id", 1}
+    };
+    auto select_msg = web_hmi::CreateMessage("SelectWeldDataSet", std::nullopt, select_payload);
+    mfx.Main().WebHmiIn()->DispatchMessage(std::move(select_msg));
+
+    auto rsp = ReceiveJsonByName(mfx.Main(), "SelectWeldDataSetRsp");
+    CHECK_EQ(rsp.at("result"), "fail");
+  }
+
+  TEST_CASE("weld_data_push_only_once_per_timer_tick") {
+    MultiFixture mfx;
+
+    SetupAndSelectWds(mfx);
+    MakeReady(mfx);
+    PressStart(mfx);
+
+    DispatchWeldSystemStateChange(mfx.Main(), weld_system::WeldSystemId::ID1,
+                                  common::msg::weld_system::OnWeldSystemStateChange::State::ARCING);
+    mfx.PlcDataUpdate();
+
+    auto sub_msg = web_hmi::CreateMessage("SubscribeWeldData", std::nullopt, nlohmann::json{});
+    mfx.Main().WebHmiIn()->DispatchMessage(std::move(sub_msg));
+    ReceiveJsonByName(mfx.Main(), "SubscribeWeldDataRsp");
+
+    mfx.Main().Timer()->Dispatch("manual_weld_data_timer");
+
+    // Exactly one WeldData message is expected after all weld system data has been collected
+    auto weld_data_msg = ReceiveJsonByName(mfx.Main(), "WeldData");
+    CHECK(weld_data_msg.at("payload").contains("weldData"));
+
+    // No second WeldData message should appear
+    auto extra = OptionalReceiveJsonByName(mfx.Main(), "WeldData");
+    CHECK_FALSE(extra.has_value());
+  }
 }
 
 // NOLINTEND(*-magic-numbers, *-optional-access)

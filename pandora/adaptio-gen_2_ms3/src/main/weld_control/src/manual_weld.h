@@ -81,6 +81,7 @@ class ManualWeld {
   bool weld_data_subscribed_{false};
   uint32_t weld_system_state_sub_handle_{0};
   std::optional<uint32_t> weld_data_timer_id_;
+  int pending_weld_data_responses_{0};
 
   struct WeldSystemInfo {
     weld_system::WeldSystemState state{weld_system::WeldSystemState::INIT};

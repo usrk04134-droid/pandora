@@ -61,6 +61,11 @@ ManualWeld::~ManualWeld() {
 }
 
 void ManualWeld::OnSelectWeldDataSet(nlohmann::json const& payload) {
+  if (state_ == ArcState::STARTING || state_ == ArcState::ACTIVE) {
+    web_hmi_->Send("SelectWeldDataSetRsp", FAILURE_PAYLOAD, "Cannot change weld data set while welding", std::nullopt);
+    return;
+  }
+
   int id  = 0;
   bool ok = payload.contains("id") && payload.at("id").get_to(id);
 
@@ -221,6 +226,22 @@ void ManualWeld::OnWeldSystemStateChange(weld_system::WeldSystemId id, weld_syst
     return;
   }
 
+  if (state_ == ArcState::STARTING) {
+    // Roll back only when the weld system reports a definitive non-welding state
+    // (READY_TO_START, INIT, ERROR). IN_WELDING_SEQUENCE is a normal transition
+    // toward ARCING and must not trigger a rollback.
+    bool const is_rollback_state =
+        (state == weld_system::WeldSystemState::READY_TO_START || state == weld_system::WeldSystemState::INIT ||
+         state == weld_system::WeldSystemState::ERROR);
+    if (is_rollback_state) {
+      bool const all_ready = std::ranges::all_of(weld_systems_, [](auto const& pair) {
+        return pair.second.state == weld_system::WeldSystemState::READY_TO_START;
+      });
+      SetState(all_ready ? ArcState::READY : ArcState::CONFIGURED);
+    }
+    return;
+  }
+
   if (state_ == ArcState::ACTIVE) {
     bool const any_arcing = std::ranges::any_of(
         weld_systems_, [](auto const& pair) { return pair.second.state == weld_system::WeldSystemState::ARCING; });
@@ -289,6 +310,7 @@ void ManualWeld::UpdateReadiness() {
 void ManualWeld::OnWeldDataTimer() { RequestWeldData(); }
 
 void ManualWeld::RequestWeldData() {
+  pending_weld_data_responses_ = static_cast<int>(weld_systems_.size());
   for (auto const& [ws_id, info] : weld_systems_) {
     weld_system_client_->GetWeldSystemData(
         ws_id, [this](weld_system::WeldSystemId id, weld_system::WeldSystemData const& data) {
@@ -297,7 +319,9 @@ void ManualWeld::RequestWeldData() {
             it->second.measured_voltage = static_cast<float>(data.voltage);
             it->second.measured_current = static_cast<float>(data.current);
           }
-          PushWeldData();
+          if (--pending_weld_data_responses_ == 0) {
+            PushWeldData();
+          }
         });
   }
 }
