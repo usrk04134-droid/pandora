@@ -100,6 +100,7 @@ class TestStartingWeld:
     creating and selecting weld data sets, and verifying arc state transitions.
     """
 
+    @pytest.mark.weld
     def test_add_weld_process_parameters(self, web_hmi: AdaptioWebHmi):
         """Test adding weld process parameters for both weld systems.
 
@@ -118,6 +119,7 @@ class TestStartingWeld:
         result_ws2 = add_weld_process_parameters(web_hmi, **ws2_config)
         assert result_ws2, "Adding weld process parameters for WS2 should succeed"
 
+    @pytest.mark.weld
     def test_add_weld_data_set(self, web_hmi: AdaptioWebHmi, weld_process_parameters_setup):
         """Test adding a weld data set that links two weld process parameters.
 
@@ -133,6 +135,7 @@ class TestStartingWeld:
         )
         assert result, "Adding weld data set should succeed"
 
+    @pytest.mark.weld
     def test_get_weld_data_sets(self, web_hmi: AdaptioWebHmi, weld_data_set_setup):
         """Test retrieving weld data sets after adding one.
 
@@ -143,6 +146,7 @@ class TestStartingWeld:
         assert weld_data_sets is not None, "GetWeldDataSets should return a response"
         logger.info(f"Retrieved weld data sets: {weld_data_sets}")
 
+    @pytest.mark.weld
     def test_select_weld_data_set(self, web_hmi: AdaptioWebHmi, weld_data_set_setup):
         """Test selecting a weld data set.
 
@@ -154,6 +158,7 @@ class TestStartingWeld:
         result = select_weld_data_set(web_hmi, weld_data_set_id=wds_id)
         assert result, "Selecting weld data set should succeed"
 
+    @pytest.mark.weld
     def test_arc_state_idle_on_subscribe(self, web_hmi: AdaptioWebHmi):
         """Test that subscribing to arc state returns IDLE as initial state.
 
@@ -166,6 +171,7 @@ class TestStartingWeld:
         logger.info(f"Initial arc state: {state}")
         assert state == "idle", f"Initial arc state should be 'idle', got '{state}'"
 
+    @pytest.mark.weld
     def test_arc_state_transitions_to_configured(self, web_hmi: AdaptioWebHmi, weld_data_set_setup):
         """Test that selecting a weld data set transitions arc state to CONFIGURED.
 
