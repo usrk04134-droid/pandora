@@ -312,6 +312,12 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "weld: mark test as weld operation test (WPP, WDS, arc state)"
     )
+    config.addinivalue_line(
+        "markers", "weld_process_parameters: mark test as weld process parameters CRUD test"
+    )
+    config.addinivalue_line(
+        "markers", "weld_data_set: mark test as weld data set CRUD test"
+    )
 
 
 @pytest.fixture(name="testrail", scope="session", autouse=True)
