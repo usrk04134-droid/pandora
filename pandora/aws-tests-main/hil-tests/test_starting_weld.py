@@ -244,7 +244,7 @@ def clean_weld_test_data(web_hmi: AdaptioWebHmi, wds_names: list[str], wpp_names
                 remove_weld_data_set(web_hmi, wds_id)
                 logger.info(f"Removed WDS '{name}' (id={wds_id})")
             except Exception:
-                logger.warning(f"Failed to remove WDS '{name}' (id={wds_id})")
+                logger.warning(f"Failed to remove WDS '{name}' (id={wds_id})", exc_info=True)
 
     # Then remove WPPs
     for name in wpp_names:
@@ -254,7 +254,7 @@ def clean_weld_test_data(web_hmi: AdaptioWebHmi, wds_names: list[str], wpp_names
                 remove_weld_process_parameters(web_hmi, wpp_id)
                 logger.info(f"Removed WPP '{name}' (id={wpp_id})")
             except Exception:
-                logger.warning(f"Failed to remove WPP '{name}' (id={wpp_id})")
+                logger.warning(f"Failed to remove WPP '{name}' (id={wpp_id})", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
