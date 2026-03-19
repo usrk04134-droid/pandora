@@ -25,8 +25,6 @@ import pytest
 from loguru import logger
 
 from conftest import (
-    add_weld_data_set,
-    add_weld_process_parameters,
     ensure_weld_data_set,
     ensure_weld_process_parameters,
     get_weld_data_sets,
@@ -333,10 +331,10 @@ class TestWeldDataHandling:
           1. GetWeldDataSets (get the list)
           2. Select WDS by name from the list
           3. RemoveWeldDataSet with the found ID
-          4. Re-create the WDS for subsequent tests
+          4. Verify the WDS is no longer in the list
 
-        Note: The WDS is re-created after deletion to avoid breaking
-        subsequent tests that depend on weld_data_set_setup.
+        Subsequent tests that need the WDS will re-create it via
+        the ensure (upsert) pattern in the weld_data_set_setup fixture.
         """
         # Get WDS list and select by name (per spec)
         wds_list = get_weld_data_sets(web_hmi)
@@ -356,15 +354,6 @@ class TestWeldDataHandling:
         wds_list_after = get_weld_data_sets(web_hmi)
         wds_names = [w["name"] for w in (wds_list_after or []) if isinstance(w, dict)]
         assert "ManualWeld" not in wds_names, "WDS 'ManualWeld' should be removed"
-
-        # Re-create WDS for subsequent tests
-        wpp_ids = weld_data_set_setup
-        add_weld_data_set(
-            web_hmi,
-            name="ManualWeld",
-            ws1_wpp_id=wpp_ids["ws1_wpp_id"],
-            ws2_wpp_id=wpp_ids["ws2_wpp_id"],
-        )
 
     # --- Arc State ---
 
