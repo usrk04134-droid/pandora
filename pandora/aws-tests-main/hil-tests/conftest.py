@@ -1834,12 +1834,27 @@ def web_hmi_fixture(request: pytest.FixtureRequest):
 
 
 @pytest.fixture(name="clean_weld_state")
-def clean_weld_state_fixture(web_hmi: AdaptioWebHmi):
-    """Remove all weld data before and after the test."""
+def clean_weld_state_fixture(request: pytest.FixtureRequest, web_hmi: AdaptioWebHmi):
+    """Remove all weld data before and after the test.
+
+    If the initial cleanup fails (e.g. the database file does not exist),
+    the fixture checks database availability via ``ensure_db_available``
+    and restarts Adaptio to create the database if necessary – following
+    the same pattern as ``update_adaptio_config`` in
+    ``test_joint_tracking.py``.
+    """
     try:
         clean_weld_data(web_hmi)
     except Exception:
-        pytest.skip("Could not clean weld data")
+        logger.info("clean_weld_data failed, checking database availability")
+        try:
+            adaptio_manager: AdaptioManager = request.getfixturevalue("adaptio_manager")
+            if ensure_db_available(request, adaptio_manager):
+                # Adaptio was restarted – reconnect and retry
+                web_hmi.connect()
+            clean_weld_data(web_hmi)
+        except Exception:
+            pytest.skip("Could not clean weld data or ensure database")
 
     yield
 
@@ -1864,6 +1879,38 @@ def seeded_weld_data_fixture(web_hmi: AdaptioWebHmi, clean_weld_state):
         pytest.skip("Could not seed weld data")
 
     return ws1_id, ws2_id, wds_id
+
+
+# ---------------------------------------------------------------------------
+# Database availability helpers
+# ---------------------------------------------------------------------------
+
+def ensure_db_available(
+    request: pytest.FixtureRequest,
+    adaptio_manager: AdaptioManager,
+) -> bool:
+    """Check if the Adaptio database file exists and create it if not.
+
+    If the database file is not available, restarts Adaptio so it re-creates
+    the database via ``SQLite::OPEN_CREATE`` (see ``main.cc``).
+
+    Returns ``True`` if a restart was performed, ``False`` if the database
+    already existed.
+
+    Reference: ``test_joint_tracking.py`` → ``update_adaptio_config`` fixture.
+    """
+    db_path = (
+        request.config.ADAPTIO_USER_CONFIG_PATH / request.config.ADAPTIO_DB
+    )
+    cmd = f"test -f {shlex.quote(str(db_path))}"
+    _, _, exit_code = adaptio_manager.manager.execute_command(
+        command=cmd, sudo=True
+    )
+    if exit_code != 0:
+        logger.info(f"Database file {db_path} not found, restarting Adaptio to create it")
+        adaptio_manager.restart_adaptio()
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
