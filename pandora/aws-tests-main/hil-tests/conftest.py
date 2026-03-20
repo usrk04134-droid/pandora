@@ -162,15 +162,16 @@ def _receive_web_hmi_message_by_name(
     timeout_seconds: int = 1,
 ) -> dict | None:
     """Receive up to max_messages websocket frames and return the first matching JSON message."""
-    seen_names: list[Any] = []
+    seen_names: list[str | None] = []
 
     try:
         web_hmi.connect()
         for _ in range(max_messages):
             raw_message = web_hmi.ws_client.receive_message(timeout=timeout_seconds)
             message = json.loads(raw_message)
-            seen_names.append(message.get("name"))
-            if message.get("name") == expected_name:
+            message_name = message.get("name")
+            seen_names.append(message_name if isinstance(message_name, str) else None)
+            if message_name == expected_name:
                 return message
     except Exception as exc:
         logger.exception(f"Failed receiving WebHMI message {expected_name}: {exc}")
