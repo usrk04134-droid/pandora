@@ -137,8 +137,10 @@ def get_weld_process_parameters_config(weld_system: str) -> dict:
 
 def _extract_response_result(response: dict) -> str | None:
     payload = response.get("payload")
-    if isinstance(payload, dict) and payload.get("result") is not None:
-        return payload.get("result")
+    if isinstance(payload, dict):
+        payload_result = payload.get("result")
+        if payload_result is not None:
+            return payload_result
 
     return response.get("result")
 
@@ -160,7 +162,7 @@ def _receive_web_hmi_message_by_name(
     timeout_seconds: int = 1,
 ) -> dict | None:
     """Receive up to max_messages websocket frames and return the first matching JSON message."""
-    seen_names: list[str | None] = []
+    seen_names: list[Any] = []
 
     try:
         web_hmi.connect()

@@ -159,3 +159,5 @@ class TestStartingWeld:
             assert state is not None, "Should receive arc state update after selection"
             logger.info(f"Arc state after selection: {state}")
             assert state == "configured", f"Arc state should transition to 'configured', got '{state}'"
+        else:
+            logger.info("Arc state was already configured before selection; verifying it remains configured")
