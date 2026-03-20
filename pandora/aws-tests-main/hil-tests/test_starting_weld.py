@@ -18,7 +18,7 @@ from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi
 from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
 
 
-def _find_wpp_ids(web_hmi: AdaptioWebHmi, ws1_name: str, ws2_name: str) -> dict | None:
+def _find_weld_process_parameter_ids(web_hmi: AdaptioWebHmi, ws1_name: str, ws2_name: str) -> dict | None:
     wpp_list = get_weld_process_parameters(web_hmi)
     if not wpp_list:
         return None
@@ -37,7 +37,7 @@ def _find_wpp_ids(web_hmi: AdaptioWebHmi, ws1_name: str, ws2_name: str) -> dict 
     return None
 
 
-def _find_wds_id(web_hmi: AdaptioWebHmi, wds_name: str) -> int | None:
+def _find_weld_data_set_id(web_hmi: AdaptioWebHmi, wds_name: str) -> int | None:
     wds_list = get_weld_data_sets(web_hmi)
     if not wds_list:
         return None
@@ -68,7 +68,7 @@ def weld_process_parameters_setup_fixture(web_hmi: AdaptioWebHmi):
     if not add_weld_process_parameters(web_hmi, **ws2_config):
         pytest.skip("Skipping test: failed to add weld process parameters for WS2")
 
-    wpp_ids = _find_wpp_ids(web_hmi, ws1_config["name"], ws2_config["name"])
+    wpp_ids = _find_weld_process_parameter_ids(web_hmi, ws1_config["name"], ws2_config["name"])
     if wpp_ids is None:
         pytest.skip("Skipping test: could not retrieve WPP IDs after adding")
 
@@ -87,7 +87,7 @@ def weld_data_set_setup_fixture(web_hmi: AdaptioWebHmi, weld_process_parameters_
     ):
         pytest.skip("Skipping test: failed to add weld data set")
 
-    wds_id = _find_wds_id(web_hmi, "ManualWeld")
+    wds_id = _find_weld_data_set_id(web_hmi, "ManualWeld")
     if wds_id is None:
         pytest.skip("Skipping test: could not retrieve WDS ID after adding")
 

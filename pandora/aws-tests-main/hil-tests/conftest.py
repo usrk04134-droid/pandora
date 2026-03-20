@@ -149,7 +149,7 @@ def _send_web_hmi_message(web_hmi: AdaptioWebHmi, request_name: str, payload: di
         web_hmi.ws_client.send_message(str(AdaptioWebHmiMessage(name=request_name, payload=payload)))
         return True
     except Exception as exc:
-        logger.exception(f"Failed sending WebHMI message {request_name}: {exc}")
+        logger.exception(f"Failed sending WebHMI message {request_name} with payload {payload}: {exc}")
         return False
 
 
@@ -157,6 +157,7 @@ def _receive_web_hmi_message_by_name(
     web_hmi: AdaptioWebHmi,
     expected_name: str,
     max_messages: int = 10,
+    timeout_seconds: int = 1,
 ) -> dict | None:
     """Receive up to max_messages websocket frames and return the first matching JSON message."""
     seen_names: list[str | None] = []
@@ -164,7 +165,7 @@ def _receive_web_hmi_message_by_name(
     try:
         web_hmi.connect()
         for _ in range(max_messages):
-            raw_message = web_hmi.ws_client.receive_message(timeout=5)
+            raw_message = web_hmi.ws_client.receive_message(timeout=timeout_seconds)
             message = json.loads(raw_message)
             seen_names.append(message.get("name"))
             if message.get("name") == expected_name:
