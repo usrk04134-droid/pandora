@@ -1621,12 +1621,12 @@ def receive_by_name(web_hmi: AdaptioWebHmi, name: str, max_retries: int = 10) ->
         try:
             raw = web_hmi.ws_client.receive_message()
             data = json.loads(raw)
-        except Exception:
-            logger.debug(f"Transient error while waiting for '{name}', retrying")
+        except Exception as exc:
+            logger.debug(f"Transient error while waiting for '{name}': {exc}, retrying")
             try:
                 web_hmi.connect()
-            except Exception:
-                pass
+            except Exception as conn_exc:
+                logger.debug(f"Reconnection attempt failed: {conn_exc}")
             continue
         if data.get("name") == name:
             return data
