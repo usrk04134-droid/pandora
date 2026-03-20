@@ -1882,10 +1882,14 @@ def delete_adaptio_db(adaptio_manager: AdaptioManager) -> None:
         adaptio_manager.request.config.ADAPTIO_USER_CONFIG_PATH
         / adaptio_manager.request.config.ADAPTIO_DB
     )
-    adaptio_manager._run_sudo_command(
-        f"rm -f {shlex.quote(str(db_file))}", "delete database"
+    cmd = f"rm -f {shlex.quote(str(db_file))}"
+    _, stderr, exit_code = adaptio_manager.manager.execute_command(
+        command=cmd, sudo=True
     )
-    logger.info(f"Deleted database file {db_file}")
+    if exit_code != 0:
+        logger.warning(f"Failed to delete database file {db_file}: {stderr}")
+    else:
+        logger.info(f"Deleted database file {db_file}")
 
 
 @pytest.fixture(name="ensure_fresh_db")
