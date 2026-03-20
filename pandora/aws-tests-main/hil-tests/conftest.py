@@ -1899,9 +1899,7 @@ def ensure_db_available(
 
     Reference: ``test_joint_tracking.py`` → ``update_adaptio_config`` fixture.
     """
-    db_path = (
-        request.config.ADAPTIO_USER_CONFIG_PATH / request.config.ADAPTIO_DB
-    )
+    db_path = request.config.ADAPTIO_USER_CONFIG_PATH / request.config.ADAPTIO_DB
     cmd = f"test -f {shlex.quote(str(db_path))}"
     _, _, exit_code = adaptio_manager.manager.execute_command(
         command=cmd, sudo=True
