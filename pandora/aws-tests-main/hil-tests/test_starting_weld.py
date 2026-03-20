@@ -205,8 +205,8 @@ class TestStartingWeld:
 
         try:
             _send_message(web_hmi, "SubscribeArcState", {})
-            initial_push = _wait_for_message_by_name(web_hmi, "ArcState")
-            assert initial_push["payload"]["state"] == "idle"
+            idle_push = _wait_for_message_by_name(web_hmi, "ArcState")
+            assert idle_push["payload"]["state"] == "idle"
 
             ws1_wpp_id = _add_weld_process_parameters(web_hmi, ws1_name, DEFAULT_WPP_WS1)
             ws2_wpp_id = _add_weld_process_parameters(web_hmi, ws2_name, DEFAULT_WPP_WS2)
