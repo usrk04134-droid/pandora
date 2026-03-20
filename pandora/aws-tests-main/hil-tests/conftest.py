@@ -1203,7 +1203,7 @@ def add_weld_process_parameters(web_hmi: AdaptioWebHmi, **kwargs) -> bool:
             logger.info(f"Successfully added weld process parameters: {kwargs.get('name', '')}")
             return True
         else:
-            logger.warning(f"Failed to add weld process parameters: {kwargs.get('name', '')}")
+            logger.warning(f"Failed to add weld process parameters: {kwargs.get('name', '')} (result={result})")
             return False
     except Exception:
         logger.exception("Failed to add weld process parameters")
@@ -1230,7 +1230,7 @@ def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wp
             logger.info(f"Successfully added weld data set: {name}")
             return True
         else:
-            logger.warning(f"Failed to add weld data set: {name}")
+            logger.warning(f"Failed to add weld data set: {name} (result={result})")
             return False
     except Exception:
         logger.exception("Failed to add weld data set")
