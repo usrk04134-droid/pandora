@@ -361,6 +361,15 @@ auto main(int argc, char* argv[]) -> int {
 
   std::filesystem::path const database_path(path_data / "data.db3");
   LOG_INFO("SQLite database location: {}", database_path.string());
+
+  /* If database file exists but is not writable, remove it and let SQLite create
+   * a fresh one. A read-only database file (e.g. from filesystem recovery or
+   * bad copy) would silently prevent all write operations at runtime. */
+  if (std::filesystem::exists(database_path) && access(database_path.c_str(), W_OK) != 0) {
+    LOG_WARNING("Database file is not writable, removing: {}", database_path.string());
+    std::filesystem::remove(database_path);
+  }
+
   auto database =
       // NOLINTNEXTLINE(hicpp-signed-bitwise)
       std::make_unique<SQLite::Database>(database_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);

@@ -72,7 +72,7 @@ class AdaptioWebHmiMessage(BaseModel):
     """Base class for the Adaptio WebHMI message format."""
 
     name: str
-    payload: Dict[str, Any]
+    payload: Dict[str, Any] | list = {}
     result: str | None = None  # New separate result field in response
 
     def __str__(self):
