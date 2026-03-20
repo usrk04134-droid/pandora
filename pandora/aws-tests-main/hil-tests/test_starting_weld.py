@@ -52,6 +52,7 @@ def _extract_response_result(response: dict) -> str | None:
 
 
 def _wait_for_message_by_name(web_hmi: AdaptioWebHmi, expected_name: str, max_messages: int = 10) -> dict:
+    """Receive up to max_messages websocket frames and return the first matching message."""
     seen_names: list[str | None] = []
 
     try:
@@ -157,6 +158,7 @@ class TestStartingWeld:
     @pytest.fixture(autouse=True)
     def setup_adaptio_logs(self, adaptio_manager) -> None:
         """Enable Adaptio log collection for this module when configured."""
+        # Intentionally keep the fixture dependency for its setup/teardown side effects.
         _ = adaptio_manager
 
     def test_create_and_select_weld_data_for_manual_weld(self, web_hmi: AdaptioWebHmi) -> None:
