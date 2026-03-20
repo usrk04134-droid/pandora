@@ -1609,11 +1609,25 @@ def receive_by_name(web_hmi: AdaptioWebHmi, name: str, max_retries: int = 10) ->
     Using raw ``json.loads`` instead of ``AdaptioWebHmiMessage`` avoids
     Pydantic validation failures when the server response contains a list
     payload or omits the ``payload`` key on failure.
+
+    Transient errors (timeouts, closed connections) are caught inside the
+    retry loop so that a single hiccup does not abort the entire receive
+    sequence.  Uses broad ``except Exception`` because
+    ``websockets.exceptions.ConnectionClosedError`` inherits from
+    ``Exception``, not from ``ConnectionError``.
     """
     web_hmi.connect()
     for _ in range(max_retries):
-        raw = web_hmi.ws_client.receive_message()
-        data = json.loads(raw)
+        try:
+            raw = web_hmi.ws_client.receive_message()
+            data = json.loads(raw)
+        except Exception:
+            logger.debug(f"Transient error while waiting for '{name}', retrying")
+            try:
+                web_hmi.connect()
+            except Exception:
+                pass
+            continue
         if data.get("name") == name:
             return data
     raise TimeoutError(f"Did not receive '{name}' within {max_retries} attempts")
