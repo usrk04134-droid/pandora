@@ -410,7 +410,6 @@ def get_abw_simulation_params(config_path: Path | None = None) -> AbwSimConfig:
     """
     if config_path is None:
         config_path = Path(__file__).parent / "adaptio_configs" / "abw_simulation_params.yaml"
-    
     if not config_path.exists():
         raise ValueError(f"Configuration file not found: {config_path}")
     
