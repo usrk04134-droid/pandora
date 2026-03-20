@@ -1,5 +1,6 @@
 """Configuration file for all hil/demorig tests."""
 
+import json
 import os
 import shutil
 import tarfile
@@ -18,7 +19,7 @@ from laserbeak import logger, setup_logging
 
 from managers import AdaptioManager, TestRailManager
 from testzilla.utility.playwright import PlaywrightManager
-from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi
+from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi, AdaptioWebHmiMessage
 from testzilla.plc.models import PlcProgramWrite
 from testzilla.plc.plc_json_rpc import PlcJsonRpc
 from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
@@ -88,6 +89,262 @@ def get_joint_geometry_config(joint_type: str = "cw") -> dict:
 
     # Map YAML field names to API field names
     return {api_name: float(cal_data[yaml_name]) for yaml_name, api_name in field_mapping.items()}
+
+
+DEFAULT_WELD_PROCESS_PARAMETERS_CONFIG = {
+    "ws1": {
+        "name": "ManualWS1",
+        "method": "dc",
+        "regulationType": "cc",
+        "startAdjust": 10,
+        "startType": "scratch",
+        "voltage": 25.0,
+        "current": 200.0,
+        "wireSpeed": 15.0,
+        "iceWireSpeed": 0.0,
+        "acFrequency": 60.0,
+        "acOffset": 1.2,
+        "acPhaseShift": 0.5,
+        "craterFillTime": 2.0,
+        "burnBackTime": 1.0,
+    },
+    "ws2": {
+        "name": "ManualWS2",
+        "method": "dc",
+        "regulationType": "cc",
+        "startAdjust": 10,
+        "startType": "direct",
+        "voltage": 28.0,
+        "current": 180.0,
+        "wireSpeed": 14.0,
+        "iceWireSpeed": 0.0,
+        "acFrequency": 60.0,
+        "acOffset": 1.2,
+        "acPhaseShift": 0.5,
+        "craterFillTime": 2.0,
+        "burnBackTime": 1.0,
+    },
+}
+
+
+def get_weld_process_parameters_config(weld_system: str) -> dict:
+    """Return default weld process parameter config for the requested weld system."""
+    try:
+        return DEFAULT_WELD_PROCESS_PARAMETERS_CONFIG[weld_system].copy()
+    except KeyError as exc:
+        raise ValueError(f"Unsupported weld system config: {weld_system}") from exc
+
+
+def _extract_response_result(response: dict) -> str | None:
+    payload = response.get("payload")
+    if isinstance(payload, dict) and payload.get("result") is not None:
+        return payload.get("result")
+
+    return response.get("result")
+
+
+def _send_web_hmi_message(web_hmi: AdaptioWebHmi, request_name: str, payload: dict) -> bool:
+    try:
+        web_hmi.connect()
+        web_hmi.ws_client.send_message(str(AdaptioWebHmiMessage(name=request_name, payload=payload)))
+        return True
+    except Exception as exc:
+        logger.exception(f"Failed sending WebHMI message {request_name}: {exc}")
+        return False
+
+
+def _receive_web_hmi_message_by_name(
+    web_hmi: AdaptioWebHmi,
+    expected_name: str,
+    max_messages: int = 10,
+) -> dict | None:
+    """Receive up to max_messages websocket frames and return the first matching JSON message."""
+    seen_names: list[str | None] = []
+
+    try:
+        web_hmi.connect()
+        for _ in range(max_messages):
+            raw_message = web_hmi.ws_client.receive_message(timeout=5)
+            message = json.loads(raw_message)
+            seen_names.append(message.get("name"))
+            if message.get("name") == expected_name:
+                return message
+    except Exception as exc:
+        logger.exception(f"Failed receiving WebHMI message {expected_name}: {exc}")
+        return None
+
+    logger.warning(f"Did not receive {expected_name}. Received: {seen_names}")
+    return None
+
+
+def _request_web_hmi_json(
+    web_hmi: AdaptioWebHmi,
+    request_name: str,
+    response_name: str,
+    payload: dict,
+) -> dict | None:
+    if not _send_web_hmi_message(web_hmi, request_name, payload):
+        return None
+
+    return _receive_web_hmi_message_by_name(web_hmi, response_name)
+
+
+def get_weld_process_parameters(web_hmi: AdaptioWebHmi) -> list[dict] | None:
+    """Return current weld process parameters list from WebHMI."""
+    response = _request_web_hmi_json(web_hmi, "GetWeldProcessParameters", "GetWeldProcessParametersRsp", {})
+    if response is None:
+        return None
+
+    payload = response.get("payload")
+    if not isinstance(payload, list):
+        logger.warning(f"Unexpected weld process parameters payload: {payload!r}")
+        return None
+
+    return payload
+
+
+def get_weld_data_sets(web_hmi: AdaptioWebHmi) -> list[dict] | None:
+    """Return current weld data set list from WebHMI."""
+    response = _request_web_hmi_json(web_hmi, "GetWeldDataSets", "GetWeldDataSetsRsp", {})
+    if response is None:
+        return None
+
+    payload = response.get("payload")
+    if not isinstance(payload, list):
+        logger.warning(f"Unexpected weld data sets payload: {payload!r}")
+        return None
+
+    return payload
+
+
+def _get_weld_programs(web_hmi: AdaptioWebHmi) -> list[dict] | None:
+    response = _request_web_hmi_json(web_hmi, "GetWeldPrograms", "GetWeldProgramsRsp", {})
+    if response is None:
+        return None
+
+    payload = response.get("payload")
+    if not isinstance(payload, list):
+        logger.warning(f"Unexpected weld programs payload: {payload!r}")
+        return None
+
+    return payload
+
+
+def add_weld_process_parameters(web_hmi: AdaptioWebHmi, **kwargs) -> bool:
+    """Add weld process parameters through WebHMI."""
+    response = _request_web_hmi_json(
+        web_hmi,
+        "AddWeldProcessParameters",
+        "AddWeldProcessParametersRsp",
+        kwargs,
+    )
+    return response is not None and _extract_response_result(response) == "ok"
+
+
+def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int) -> bool:
+    """Add a weld data set through WebHMI."""
+    response = _request_web_hmi_json(
+        web_hmi,
+        "AddWeldDataSet",
+        "AddWeldDataSetRsp",
+        {"name": name, "ws1WppId": ws1_wpp_id, "ws2WppId": ws2_wpp_id},
+    )
+    return response is not None and _extract_response_result(response) == "ok"
+
+
+def select_weld_data_set(web_hmi: AdaptioWebHmi, weld_data_set_id: int) -> bool:
+    """Select a weld data set through WebHMI."""
+    response = _request_web_hmi_json(
+        web_hmi,
+        "SelectWeldDataSet",
+        "SelectWeldDataSetRsp",
+        {"id": weld_data_set_id},
+    )
+    return response is not None and _extract_response_result(response) == "ok"
+
+
+def receive_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
+    """Wait for an ArcState push message and return its state value."""
+    message = _receive_web_hmi_message_by_name(web_hmi, "ArcState")
+    if message is None:
+        return None
+
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        logger.warning(f"Unexpected ArcState payload: {payload!r}")
+        return None
+
+    return payload.get("state")
+
+
+def subscribe_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
+    """Subscribe to ArcState and return the immediate state push."""
+    if not _send_web_hmi_message(web_hmi, "SubscribeArcState", {}):
+        return None
+
+    return receive_arc_state(web_hmi)
+
+
+def _remove_weld_program(web_hmi: AdaptioWebHmi, weld_program_id: int) -> bool:
+    response = _request_web_hmi_json(
+        web_hmi,
+        "RemoveWeldProgram",
+        "RemoveWeldProgramRsp",
+        {"id": weld_program_id},
+    )
+    return response is not None and _extract_response_result(response) == "ok"
+
+
+def _remove_weld_data_set(web_hmi: AdaptioWebHmi, weld_data_set_id: int) -> bool:
+    response = _request_web_hmi_json(
+        web_hmi,
+        "RemoveWeldDataSet",
+        "RemoveWeldDataSetRsp",
+        {"id": weld_data_set_id},
+    )
+    return response is not None and _extract_response_result(response) == "ok"
+
+
+def _remove_weld_process_parameters(web_hmi: AdaptioWebHmi, weld_process_parameters_id: int) -> bool:
+    response = _request_web_hmi_json(
+        web_hmi,
+        "RemoveWeldProcessParameters",
+        "RemoveWeldProcessParametersRsp",
+        {"id": weld_process_parameters_id},
+    )
+    return response is not None and _extract_response_result(response) == "ok"
+
+
+def clean_weld_data(web_hmi: AdaptioWebHmi) -> bool:
+    """Remove stored weld programs, weld data sets and weld process parameters."""
+    weld_programs = _get_weld_programs(web_hmi)
+    if weld_programs is None:
+        return False
+
+    for weld_program in weld_programs:
+        if isinstance(weld_program, dict) and weld_program.get("id") is not None:
+            if not _remove_weld_program(web_hmi, weld_program["id"]):
+                return False
+
+    weld_data_sets = get_weld_data_sets(web_hmi)
+    if weld_data_sets is None:
+        return False
+
+    for weld_data_set in weld_data_sets:
+        if isinstance(weld_data_set, dict) and weld_data_set.get("id") is not None:
+            if not _remove_weld_data_set(web_hmi, weld_data_set["id"]):
+                return False
+
+    weld_process_parameters = get_weld_process_parameters(web_hmi)
+    if weld_process_parameters is None:
+        return False
+
+    for weld_process_parameter in weld_process_parameters:
+        if isinstance(weld_process_parameter, dict) and weld_process_parameter.get("id") is not None:
+            if not _remove_weld_process_parameters(web_hmi, weld_process_parameter["id"]):
+                return False
+
+    return True
 
 
 # dataclasses for cleaner ABW simulation configuration
@@ -308,6 +565,9 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers", "webhmi_settings: mark test as WebHMI settings/configuration test"
+    )
+    config.addinivalue_line(
+        "markers", "gen2: mark test as Gen2 HIL test"
     )
 
 
@@ -1574,4 +1834,3 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int):
     except Exception as e:
         logger.debug(f"Error during event loop cleanup at session end: {e}")
     
-

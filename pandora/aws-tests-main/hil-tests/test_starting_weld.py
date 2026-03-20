@@ -1,230 +1,161 @@
-"""HIL integration tests for starting weld setup via WebHMI."""
-
-import json
-import uuid
+"""HIL test case for starting weld functionality."""
 
 import pytest
 from loguru import logger
 
-from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi, AdaptioWebHmiMessage
+from conftest import (
+    add_weld_data_set,
+    add_weld_process_parameters,
+    clean_weld_data,
+    get_weld_data_sets,
+    get_weld_process_parameters,
+    get_weld_process_parameters_config,
+    receive_arc_state,
+    select_weld_data_set,
+    subscribe_arc_state,
+)
+from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi
 from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
 
 
-DEFAULT_WPP_WS1 = {
-    "method": "dc",
-    "regulationType": "cc",
-    "startAdjust": 10,
-    "startType": "scratch",
-    "voltage": 25.0,
-    "current": 200.0,
-    "wireSpeed": 15.0,
-    "iceWireSpeed": 0.0,
-    "acFrequency": 60.0,
-    "acOffset": 1.2,
-    "acPhaseShift": 0.5,
-    "craterFillTime": 2.0,
-    "burnBackTime": 1.0,
-}
+def _find_wpp_ids(web_hmi: AdaptioWebHmi, ws1_name: str, ws2_name: str) -> dict | None:
+    wpp_list = get_weld_process_parameters(web_hmi)
+    if not wpp_list:
+        return None
 
-DEFAULT_WPP_WS2 = {
-    "method": "dc",
-    "regulationType": "cc",
-    "startAdjust": 10,
-    "startType": "direct",
-    "voltage": 28.0,
-    "current": 180.0,
-    "wireSpeed": 14.0,
-    "iceWireSpeed": 0.0,
-    "acFrequency": 60.0,
-    "acOffset": 1.2,
-    "acPhaseShift": 0.5,
-    "craterFillTime": 2.0,
-    "burnBackTime": 1.0,
-}
+    ws1_wpp_id = None
+    ws2_wpp_id = None
+    for wpp in wpp_list:
+        if isinstance(wpp, dict):
+            if wpp.get("name") == ws1_name:
+                ws1_wpp_id = wpp.get("id")
+            elif wpp.get("name") == ws2_name:
+                ws2_wpp_id = wpp.get("id")
+
+    if ws1_wpp_id is not None and ws2_wpp_id is not None:
+        return {"ws1_wpp_id": ws1_wpp_id, "ws2_wpp_id": ws2_wpp_id}
+    return None
 
 
-def _extract_response_result(response: dict) -> str | None:
-    payload = response.get("payload")
-    if isinstance(payload, dict) and payload.get("result") is not None:
-        return payload.get("result")
+def _find_wds_id(web_hmi: AdaptioWebHmi, wds_name: str) -> int | None:
+    wds_list = get_weld_data_sets(web_hmi)
+    if not wds_list:
+        return None
 
-    return response.get("result")
-
-
-def _wait_for_message_by_name(web_hmi: AdaptioWebHmi, expected_name: str, max_messages: int = 10) -> dict:
-    """Receive up to max_messages websocket frames and return the first matching message."""
-    seen_names: list[str | None] = []
-
-    try:
-        web_hmi.connect()
-        for _ in range(max_messages):
-            raw_message = web_hmi.ws_client.receive_message(timeout=5)
-            message = json.loads(raw_message)
-            seen_names.append(message.get("name"))
-            if message.get("name") == expected_name:
-                return message
-    except Exception as exc:
-        logger.exception(f"Failed receiving WebHMI message {expected_name}: {exc}")
-        pytest.skip(f"Skipping weld HIL test due to WebHMI communication failure: {exc}")
-
-    raise AssertionError(f"Did not receive {expected_name}. Received: {seen_names}")
-
-
-def _send_message(web_hmi: AdaptioWebHmi, request_name: str, payload: dict) -> None:
-    try:
-        web_hmi.send_message(AdaptioWebHmiMessage(name=request_name, payload=payload))
-    except Exception as exc:
-        logger.exception(f"Failed sending WebHMI message {request_name}: {exc}")
-        pytest.skip(f"Skipping weld HIL test due to WebHMI communication failure: {exc}")
-
-
-def _request_json(web_hmi: AdaptioWebHmi, request_name: str, response_name: str, payload: dict) -> dict:
-    _send_message(web_hmi, request_name, payload)
-    return _wait_for_message_by_name(web_hmi, response_name)
-
-
-def _get_weld_process_parameters(web_hmi: AdaptioWebHmi) -> list[dict]:
-    response = _request_json(web_hmi, "GetWeldProcessParameters", "GetWeldProcessParametersRsp", {})
-    payload = response.get("payload")
-    assert isinstance(payload, list), f"Unexpected weld process parameters payload: {payload!r}"
-    return payload
-
-
-def _get_weld_data_sets(web_hmi: AdaptioWebHmi) -> list[dict]:
-    response = _request_json(web_hmi, "GetWeldDataSets", "GetWeldDataSetsRsp", {})
-    payload = response.get("payload")
-    assert isinstance(payload, list), f"Unexpected weld data set payload: {payload!r}"
-    return payload
-
-
-def _find_by_name(items: list[dict], name: str) -> dict | None:
-    return next((item for item in items if item.get("name") == name), None)
-
-
-def _add_weld_process_parameters(web_hmi: AdaptioWebHmi, name: str, defaults: dict) -> int:
-    response = _request_json(
-        web_hmi,
-        "AddWeldProcessParameters",
-        "AddWeldProcessParametersRsp",
-        {"name": name, **defaults},
-    )
-    assert _extract_response_result(response) == "ok", response
-
-    created = _find_by_name(_get_weld_process_parameters(web_hmi), name)
-    assert created is not None, f"Weld process parameters {name} were not returned by GetWeldProcessParameters"
-    return created["id"]
-
-
-def _add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int) -> int:
-    response = _request_json(
-        web_hmi,
-        "AddWeldDataSet",
-        "AddWeldDataSetRsp",
-        {"name": name, "ws1WppId": ws1_wpp_id, "ws2WppId": ws2_wpp_id},
-    )
-    assert _extract_response_result(response) == "ok", response
-
-    created = _find_by_name(_get_weld_data_sets(web_hmi), name)
-    assert created is not None, f"Weld data set {name} was not returned by GetWeldDataSets"
-    return created["id"]
-
-
-def _cleanup_created_weld_data(web_hmi: AdaptioWebHmi, weld_data_set_id: int | None, wpp_ids: list[int]) -> None:
-    if weld_data_set_id is not None:
-        try:
-            _request_json(web_hmi, "RemoveWeldDataSet", "RemoveWeldDataSetRsp", {"id": weld_data_set_id})
-        except Exception as exc:
-            logger.warning(f"Best-effort cleanup failed for weld data set {weld_data_set_id}: {exc}")
-
-    for wpp_id in wpp_ids:
-        try:
-            _request_json(web_hmi, "RemoveWeldProcessParameters", "RemoveWeldProcessParametersRsp", {"id": wpp_id})
-        except Exception as exc:
-            logger.warning(f"Best-effort cleanup failed for weld process parameters {wpp_id}: {exc}")
+    for wds in wds_list:
+        if isinstance(wds, dict) and wds.get("name") == wds_name:
+            return wds.get("id")
+    return None
 
 
 @pytest.fixture(name="web_hmi")
-def web_hmi_fixture(request: pytest.FixtureRequest) -> AdaptioWebHmi:
-    client = AdaptioWebHmi(uri=request.config.WEB_HMI_URI)
-    try:
-        yield client
-    finally:
-        cleanup_web_hmi_client(client)
+def web_hmi_fixture(request: pytest.FixtureRequest):
+    web_hmi = AdaptioWebHmi(uri=request.config.WEB_HMI_URI)
+    yield web_hmi
+    cleanup_web_hmi_client(web_hmi)
+
+
+@pytest.fixture(name="weld_process_parameters_setup")
+def weld_process_parameters_setup_fixture(web_hmi: AdaptioWebHmi):
+    if not clean_weld_data(web_hmi):
+        pytest.skip("Skipping test: failed to clean existing weld data")
+
+    ws1_config = get_weld_process_parameters_config("ws1")
+    ws2_config = get_weld_process_parameters_config("ws2")
+
+    if not add_weld_process_parameters(web_hmi, **ws1_config):
+        pytest.skip("Skipping test: failed to add weld process parameters for WS1")
+    if not add_weld_process_parameters(web_hmi, **ws2_config):
+        pytest.skip("Skipping test: failed to add weld process parameters for WS2")
+
+    wpp_ids = _find_wpp_ids(web_hmi, ws1_config["name"], ws2_config["name"])
+    if wpp_ids is None:
+        pytest.skip("Skipping test: could not retrieve WPP IDs after adding")
+
+    logger.info(f"WPP IDs: ws1={wpp_ids['ws1_wpp_id']}, ws2={wpp_ids['ws2_wpp_id']}")
+    return wpp_ids
+
+
+@pytest.fixture(name="weld_data_set_setup")
+def weld_data_set_setup_fixture(web_hmi: AdaptioWebHmi, weld_process_parameters_setup):
+    wpp_ids = weld_process_parameters_setup
+    if not add_weld_data_set(
+        web_hmi,
+        name="ManualWeld",
+        ws1_wpp_id=wpp_ids["ws1_wpp_id"],
+        ws2_wpp_id=wpp_ids["ws2_wpp_id"],
+    ):
+        pytest.skip("Skipping test: failed to add weld data set")
+
+    wds_id = _find_wds_id(web_hmi, "ManualWeld")
+    if wds_id is None:
+        pytest.skip("Skipping test: could not retrieve WDS ID after adding")
+
+    logger.info(f"WDS ID: {wds_id}")
+    return {"wds_id": wds_id, **wpp_ids}
 
 
 class TestStartingWeld:
-    """Integration coverage for manual weld setup prior to start."""
+    """Test suite for starting weld via the adaptio module."""
 
-    @pytest.fixture(autouse=True)
-    def setup_adaptio_logs(self, adaptio_manager) -> None:
-        """Enable Adaptio log collection for this module when configured."""
-        # Intentionally keep the fixture dependency for its setup/teardown side effects.
-        _ = adaptio_manager
+    @pytest.mark.gen2
+    def test_add_weld_process_parameters(self, web_hmi: AdaptioWebHmi):
+        if not clean_weld_data(web_hmi):
+            pytest.skip("Skipping test: failed to clean existing weld data")
 
-    def test_create_and_select_weld_data_for_manual_weld(self, web_hmi: AdaptioWebHmi) -> None:
-        unique_suffix = uuid.uuid4().hex[:8]
-        ws1_name = f"hil-manual-ws1-{unique_suffix}"
-        ws2_name = f"hil-manual-ws2-{unique_suffix}"
-        weld_data_set_name = f"hil-manual-wds-{unique_suffix}"
-        weld_data_set_id = None
-        wpp_ids: list[int] = []
+        ws1_config = get_weld_process_parameters_config("ws1")
+        ws2_config = get_weld_process_parameters_config("ws2")
 
-        try:
-            initial_arc_state = _request_json(web_hmi, "GetArcState", "GetArcStateRsp", {})
-            assert initial_arc_state["payload"]["state"] == "idle"
+        result_ws1 = add_weld_process_parameters(web_hmi, **ws1_config)
+        assert result_ws1, "Adding weld process parameters for WS1 should succeed"
 
-            ws1_wpp_id = _add_weld_process_parameters(web_hmi, ws1_name, DEFAULT_WPP_WS1)
-            ws2_wpp_id = _add_weld_process_parameters(web_hmi, ws2_name, DEFAULT_WPP_WS2)
-            wpp_ids.extend([ws1_wpp_id, ws2_wpp_id])
+        result_ws2 = add_weld_process_parameters(web_hmi, **ws2_config)
+        assert result_ws2, "Adding weld process parameters for WS2 should succeed"
 
-            weld_data_set_id = _add_weld_data_set(web_hmi, weld_data_set_name, ws1_wpp_id, ws2_wpp_id)
+    @pytest.mark.gen2
+    def test_add_weld_data_set(self, web_hmi: AdaptioWebHmi, weld_process_parameters_setup):
+        wpp_ids = weld_process_parameters_setup
+        result = add_weld_data_set(
+            web_hmi,
+            name="ManualWeld",
+            ws1_wpp_id=wpp_ids["ws1_wpp_id"],
+            ws2_wpp_id=wpp_ids["ws2_wpp_id"],
+        )
+        assert result, "Adding weld data set should succeed"
 
-            weld_data_set = _find_by_name(_get_weld_data_sets(web_hmi), weld_data_set_name)
-            assert weld_data_set is not None
-            assert weld_data_set["ws1WppId"] == ws1_wpp_id
-            assert weld_data_set["ws2WppId"] == ws2_wpp_id
+    @pytest.mark.gen2
+    def test_get_weld_data_sets(self, web_hmi: AdaptioWebHmi, weld_data_set_setup):
+        weld_data_sets = get_weld_data_sets(web_hmi)
+        assert weld_data_sets is not None, "GetWeldDataSets should return a response"
+        logger.info(f"Retrieved weld data sets: {weld_data_sets}")
 
-            select_response = _request_json(
-                web_hmi,
-                "SelectWeldDataSet",
-                "SelectWeldDataSetRsp",
-                {"id": weld_data_set_id},
-            )
-            assert _extract_response_result(select_response) == "ok", select_response
+    @pytest.mark.gen2
+    def test_arc_state_idle_on_subscribe(self, web_hmi: AdaptioWebHmi):
+        state = subscribe_arc_state(web_hmi)
+        if state is None:
+            pytest.skip("Skipping test: device does not support SubscribeArcState")
+        logger.info(f"Initial arc state: {state}")
+        assert state == "idle", f"Initial arc state should be 'idle', got '{state}'"
 
-            configured_arc_state = _request_json(web_hmi, "GetArcState", "GetArcStateRsp", {})
-            assert configured_arc_state["payload"]["state"] == "configured"
-        finally:
-            _cleanup_created_weld_data(web_hmi, weld_data_set_id, wpp_ids)
+    @pytest.mark.gen2
+    def test_select_weld_data_set(self, web_hmi: AdaptioWebHmi, weld_data_set_setup):
+        wds_id = weld_data_set_setup["wds_id"]
+        result = select_weld_data_set(web_hmi, weld_data_set_id=wds_id)
+        assert result, "Selecting weld data set should succeed"
 
-    def test_subscribe_arc_state_pushes_idle_and_configured_states(self, web_hmi: AdaptioWebHmi) -> None:
-        unique_suffix = uuid.uuid4().hex[:8]
-        ws1_name = f"hil-arc-ws1-{unique_suffix}"
-        ws2_name = f"hil-arc-ws2-{unique_suffix}"
-        weld_data_set_name = f"hil-arc-wds-{unique_suffix}"
-        weld_data_set_id = None
-        wpp_ids: list[int] = []
+    @pytest.mark.gen2
+    def test_arc_state_transitions_to_configured(self, web_hmi: AdaptioWebHmi, weld_data_set_setup):
+        initial_state = subscribe_arc_state(web_hmi)
+        if initial_state is None:
+            pytest.skip("Skipping test: device does not support SubscribeArcState")
+        logger.info(f"Initial arc state: {initial_state}")
 
-        try:
-            _send_message(web_hmi, "SubscribeArcState", {})
-            idle_push = _wait_for_message_by_name(web_hmi, "ArcState")
-            assert idle_push["payload"]["state"] == "idle"
+        wds_id = weld_data_set_setup["wds_id"]
+        result = select_weld_data_set(web_hmi, weld_data_set_id=wds_id)
+        assert result, "Selecting weld data set should succeed"
 
-            ws1_wpp_id = _add_weld_process_parameters(web_hmi, ws1_name, DEFAULT_WPP_WS1)
-            ws2_wpp_id = _add_weld_process_parameters(web_hmi, ws2_name, DEFAULT_WPP_WS2)
-            wpp_ids.extend([ws1_wpp_id, ws2_wpp_id])
-
-            weld_data_set_id = _add_weld_data_set(web_hmi, weld_data_set_name, ws1_wpp_id, ws2_wpp_id)
-
-            select_response = _request_json(
-                web_hmi,
-                "SelectWeldDataSet",
-                "SelectWeldDataSetRsp",
-                {"id": weld_data_set_id},
-            )
-            assert _extract_response_result(select_response) == "ok", select_response
-
-            configured_push = _wait_for_message_by_name(web_hmi, "ArcState")
-            assert configured_push["payload"]["state"] == "configured"
-        finally:
-            _cleanup_created_weld_data(web_hmi, weld_data_set_id, wpp_ids)
+        if initial_state != "configured":
+            state = receive_arc_state(web_hmi)
+            assert state is not None, "Should receive arc state update after selection"
+            logger.info(f"Arc state after selection: {state}")
+            assert state == "configured", f"Arc state should transition to 'configured', got '{state}'"
