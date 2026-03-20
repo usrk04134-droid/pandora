@@ -309,6 +309,15 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "webhmi_settings: mark test as WebHMI settings/configuration test"
     )
+    config.addinivalue_line(
+        "markers", "weld: mark test as weld-related test"
+    )
+    config.addinivalue_line(
+        "markers", "weld_process_parameters: mark test as weld process parameters test"
+    )
+    config.addinivalue_line(
+        "markers", "weld_data_set: mark test as weld data set test"
+    )
 
 
 @pytest.fixture(name="testrail", scope="session", autouse=True)
