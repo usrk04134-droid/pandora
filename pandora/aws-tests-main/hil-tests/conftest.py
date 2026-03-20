@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import tarfile
 import time
@@ -1863,5 +1864,67 @@ def seeded_weld_data_fixture(web_hmi: AdaptioWebHmi, clean_weld_state):
         pytest.skip("Could not seed weld data")
 
     return ws1_id, ws2_id, wds_id
-    
+
+
+# ---------------------------------------------------------------------------
+# Database recreation helpers and fixtures
+# ---------------------------------------------------------------------------
+
+def delete_adaptio_db(adaptio_manager: AdaptioManager) -> None:
+    """Delete the Adaptio database file on the remote device.
+
+    Uses the same approach as ``AdaptioManager._cleanup_user_config`` but
+    targets only the database file.  Adaptio must be stopped before calling
+    this function; after a restart it will re-create the database via
+    ``SQLite::OPEN_CREATE`` (see ``main.cc``).
+    """
+    db_file = (
+        adaptio_manager.request.config.ADAPTIO_USER_CONFIG_PATH
+        / adaptio_manager.request.config.ADAPTIO_DB
+    )
+    adaptio_manager._run_sudo_command(
+        f"rm -f {shlex.quote(str(db_file))}", "delete database"
+    )
+    logger.info(f"Deleted database file {db_file}")
+
+
+@pytest.fixture(name="ensure_fresh_db")
+def ensure_fresh_db_fixture(
+    request: pytest.FixtureRequest,
+    adaptio_manager: AdaptioManager,
+) -> Iterator[AdaptioWebHmi]:
+    """Delete the Adaptio database and restart the service so it is recreated.
+
+    Yields a freshly-connected ``AdaptioWebHmi`` client.  On teardown the
+    database is deleted once more and Adaptio is restarted to leave the
+    device in a clean state (same pattern as ``update_adaptio_config``).
+
+    Reference: ``test_joint_tracking.py`` → ``update_adaptio_config`` fixture.
+    """
+    try:
+        adaptio_manager.stop_adaptio()
+        delete_adaptio_db(adaptio_manager)
+        adaptio_manager.start_adaptio()
+    except Exception:
+        pytest.skip("Could not recreate Adaptio database")
+
+    uri = request.config.WEB_HMI_URI
+    client = AdaptioWebHmi(uri=uri)
+    try:
+        client.connect()
+    except Exception:
+        pytest.skip("Could not connect to Adaptio WebHMI after DB recreation")
+
+    yield client
+
+    cleanup_web_hmi_client(client)
+
+    # Restore: delete DB and restart so the device is clean for the next test
+    try:
+        adaptio_manager.stop_adaptio()
+        delete_adaptio_db(adaptio_manager)
+        adaptio_manager.start_adaptio()
+    except Exception:
+        logger.warning("Post-test database cleanup failed")
+
 

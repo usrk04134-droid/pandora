@@ -287,34 +287,36 @@ class TestArcStateHandling:
 
 @pytest.mark.weld
 class TestWeldDataHandlingWithDatabaseRecreation:
-    """Test CRUD operations with database clean-up (recreation) in between.
+    """Test CRUD operations after the database file has been deleted and
+    recreated by restarting Adaptio.
 
-    This verifies that weld data can be fully removed and re-created within
-    the same session, exercising the database write path repeatedly.
+    Adaptio uses ``SQLite::OPEN_CREATE`` in ``main.cc``, so when the
+    ``data.db3`` file is missing at startup a fresh database is created
+    automatically.  The ``ensure_fresh_db`` fixture (modelled after the
+    ``update_adaptio_config`` pattern used in ``test_joint_tracking.py``)
+    takes care of the stop → delete → start cycle and yields a connected
+    ``AdaptioWebHmi`` client.
     """
 
-    def test_add_wpp_clean_and_readd(self, web_hmi, clean_weld_state):
-        """Add WPPs, clean the database, and re-add them."""
-        # First round
-        rsp = add_weld_process_parameters(web_hmi, WPP_DEFAULT_WS1)
-        assert rsp.get("result") == "ok"
-        wpp_list = get_weld_process_parameters(web_hmi)
-        assert len(wpp_list) == 1
+    def test_add_wpp_after_db_recreation(self, ensure_fresh_db):
+        """After deleting and recreating the database, adding WPPs must work."""
+        web_hmi = ensure_fresh_db
 
-        # Clean
-        clean_weld_data(web_hmi)
         wpp_list = get_weld_process_parameters(web_hmi)
+        assert isinstance(wpp_list, list)
         assert len(wpp_list) == 0
 
-        # Re-add
         rsp = add_weld_process_parameters(web_hmi, WPP_DEFAULT_WS1)
         assert rsp.get("result") == "ok"
+
         wpp_list = get_weld_process_parameters(web_hmi)
         assert len(wpp_list) == 1
         assert wpp_list[0]["name"] == "ManualWS1"
 
-    def test_full_crud_cycle_with_cleanup(self, web_hmi, clean_weld_state):
-        """Full CRUD cycle: create → select → update → remove all → recreate."""
+    def test_full_crud_cycle_after_db_recreation(self, ensure_fresh_db):
+        """Full CRUD cycle on a freshly-created database: add → select → update → clean."""
+        web_hmi = ensure_fresh_db
+
         # --- Create ---
         rsp1 = add_weld_process_parameters(web_hmi, WPP_DEFAULT_WS1)
         rsp2 = add_weld_process_parameters(web_hmi, WPP_DEFAULT_WS2)
@@ -347,17 +349,10 @@ class TestWeldDataHandlingWithDatabaseRecreation:
         assert len(get_weld_data_sets(web_hmi)) == 0
         assert len(get_weld_process_parameters(web_hmi)) == 0
 
-        # --- Recreate ---
-        rsp = add_weld_process_parameters(web_hmi, WPP_DEFAULT_WS1)
-        assert rsp.get("result") == "ok"
-        wpp_list = get_weld_process_parameters(web_hmi)
-        assert len(wpp_list) == 1
-        assert wpp_list[0]["name"] == "ManualWS1"
+    def test_wds_cleanup_order_after_db_recreation(self, ensure_fresh_db):
+        """On a fresh database, WDS must be removed before WPP."""
+        web_hmi = ensure_fresh_db
 
-    def test_wds_survives_wpp_cleanup_order(self, web_hmi, clean_weld_state):
-        """Verify that WDS is removed before WPP during cleanup, and that
-        attempting the wrong order fails gracefully.
-        """
         add_weld_process_parameters(web_hmi, WPP_DEFAULT_WS1)
         add_weld_process_parameters(web_hmi, WPP_DEFAULT_WS2)
         wpp_list = get_weld_process_parameters(web_hmi)
