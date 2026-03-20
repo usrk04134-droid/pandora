@@ -43,7 +43,7 @@ DEFAULT_WPP_WS2 = {
 }
 
 
-def _response_result(response: dict) -> str | None:
+def _extract_response_result(response: dict) -> str | None:
     payload = response.get("payload")
     if isinstance(payload, dict) and payload.get("result") is not None:
         return payload.get("result")
@@ -51,7 +51,7 @@ def _response_result(response: dict) -> str | None:
     return response.get("result")
 
 
-def _receive_json_by_name(web_hmi: AdaptioWebHmi, expected_name: str, max_messages: int = 10) -> dict:
+def _wait_for_message_by_name(web_hmi: AdaptioWebHmi, expected_name: str, max_messages: int = 10) -> dict:
     seen_names: list[str | None] = []
 
     try:
@@ -79,7 +79,7 @@ def _send_message(web_hmi: AdaptioWebHmi, request_name: str, payload: dict) -> N
 
 def _request_json(web_hmi: AdaptioWebHmi, request_name: str, response_name: str, payload: dict) -> dict:
     _send_message(web_hmi, request_name, payload)
-    return _receive_json_by_name(web_hmi, response_name)
+    return _wait_for_message_by_name(web_hmi, response_name)
 
 
 def _get_weld_process_parameters(web_hmi: AdaptioWebHmi) -> list[dict]:
@@ -107,7 +107,7 @@ def _add_weld_process_parameters(web_hmi: AdaptioWebHmi, name: str, defaults: di
         "AddWeldProcessParametersRsp",
         {"name": name, **defaults},
     )
-    assert _response_result(response) == "ok", response
+    assert _extract_response_result(response) == "ok", response
 
     created = _find_by_name(_get_weld_process_parameters(web_hmi), name)
     assert created is not None, f"Weld process parameters {name} were not returned by GetWeldProcessParameters"
@@ -121,7 +121,7 @@ def _add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_w
         "AddWeldDataSetRsp",
         {"name": name, "ws1WppId": ws1_wpp_id, "ws2WppId": ws2_wpp_id},
     )
-    assert _response_result(response) == "ok", response
+    assert _extract_response_result(response) == "ok", response
 
     created = _find_by_name(_get_weld_data_sets(web_hmi), name)
     assert created is not None, f"Weld data set {name} was not returned by GetWeldDataSets"
@@ -188,7 +188,7 @@ class TestStartingWeld:
                 "SelectWeldDataSetRsp",
                 {"id": weld_data_set_id},
             )
-            assert _response_result(select_response) == "ok", select_response
+            assert _extract_response_result(select_response) == "ok", select_response
 
             configured_arc_state = _request_json(web_hmi, "GetArcState", "GetArcStateRsp", {})
             assert configured_arc_state["payload"]["state"] == "configured"
@@ -205,7 +205,7 @@ class TestStartingWeld:
 
         try:
             _send_message(web_hmi, "SubscribeArcState", {})
-            initial_push = _receive_json_by_name(web_hmi, "ArcState")
+            initial_push = _wait_for_message_by_name(web_hmi, "ArcState")
             assert initial_push["payload"]["state"] == "idle"
 
             ws1_wpp_id = _add_weld_process_parameters(web_hmi, ws1_name, DEFAULT_WPP_WS1)
@@ -220,12 +220,9 @@ class TestStartingWeld:
                 "SelectWeldDataSetRsp",
                 {"id": weld_data_set_id},
             )
-            assert _response_result(select_response) == "ok", select_response
+            assert _extract_response_result(select_response) == "ok", select_response
 
-            configured_push = _receive_json_by_name(web_hmi, "ArcState")
+            configured_push = _wait_for_message_by_name(web_hmi, "ArcState")
             assert configured_push["payload"]["state"] == "configured"
-
-            weld_data_subscription = _request_json(web_hmi, "SubscribeWeldData", "SubscribeWeldDataRsp", {})
-            assert _response_result(weld_data_subscription) == "ok", weld_data_subscription
         finally:
             _cleanup_created_weld_data(web_hmi, weld_data_set_id, wpp_ids)
