@@ -8,11 +8,16 @@ and verifying arc state transitions through the manual weld state machine:
          → STARTING   (after start button)
          → ACTIVE     (when at least one power source is ARCING)
 
+    Stop sequence:
+    ACTIVE → READY    (after stop button + power sources stop arcing)
+
 Reference:
     - sysfun-welddata-handling.md (use-case specification)
     - adaptio-gen_2_ms3/src/main/weld_control/src/manual_weld.cc
     - adaptio-gen_2_ms3/src/block_tests/manual_weld_test.cc
 """
+
+import time
 
 import pytest
 from loguru import logger
@@ -25,11 +30,18 @@ from conftest import (
     get_weld_process_parameters,
     get_weld_process_parameters_config,
     receive_arc_state,
+    reset_plc_weld_signals,
     select_weld_data_set,
+    simulate_arcing,
+    simulate_arcing_stopped,
+    simulate_power_sources_ready,
+    simulate_weld_start,
+    simulate_weld_stop,
     subscribe_arc_state,
 )
 from managers import AdaptioManager
 from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi
+from testzilla.plc.plc_json_rpc import PlcJsonRpc
 from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
 
 
@@ -122,7 +134,8 @@ class TestStartingWeld:
     """Test suite for starting weld via the adaptio module.
 
     Covers the manual weld use case: adding weld process parameters,
-    creating and selecting weld data sets, and verifying arc state transitions.
+    creating and selecting weld data sets, and verifying arc state transitions
+    through the full state machine including PLC-driven start/stop.
     """
 
     @pytest.mark.gen2
@@ -191,3 +204,180 @@ class TestStartingWeld:
             assert state is not None, "Should receive arc state update after selection"
             logger.info(f"Arc state after selection: {state}")
             assert state == "configured", f"Arc state should transition to 'configured', got '{state}'"
+
+    @pytest.mark.gen2
+    def test_arc_state_ready_after_power_sources_ready(
+        self, web_hmi: AdaptioWebHmi, setup_plc: PlcJsonRpc, weld_data_set_setup
+    ):
+        """CONFIGURED → READY when both power sources report READY_TO_START.
+
+        After selecting a WDS the arc state is CONFIGURED.  Setting both
+        power source ReadyToStart flags via PLC should transition the arc
+        state to READY.
+        """
+        try:
+            reset_plc_weld_signals(setup_plc)
+        except Exception:
+            pass
+
+        # Subscribe and select WDS to reach CONFIGURED
+        initial_state = subscribe_arc_state(web_hmi)
+        if initial_state is None:
+            pytest.skip("Skipping test: device does not support SubscribeArcState")
+
+        wds_id = weld_data_set_setup["wds_id"]
+        result = select_weld_data_set(web_hmi, weld_data_set_id=wds_id)
+        assert result, "Selecting weld data set should succeed"
+
+        # Consume CONFIGURED push if needed
+        if initial_state != "configured":
+            state = receive_arc_state(web_hmi)
+            assert state == "configured", f"Expected 'configured', got '{state}'"
+
+        # Set both power sources to READY_TO_START via PLC
+        assert simulate_power_sources_ready(setup_plc), "Setting power sources ready should succeed"
+        time.sleep(0.5)  # allow PLC→Adaptio propagation
+
+        state = receive_arc_state(web_hmi)
+        assert state is not None, "Should receive arc state update after power sources ready"
+        logger.info(f"Arc state after power sources ready: {state}")
+        assert state == "ready", f"Arc state should transition to 'ready', got '{state}'"
+
+    @pytest.mark.gen2
+    def test_arc_state_starting_after_start_button(
+        self, web_hmi: AdaptioWebHmi, setup_plc: PlcJsonRpc, weld_data_set_setup
+    ):
+        """READY → STARTING when the start button is pressed via PLC.
+
+        The start sequence is: physical button → PLC Start signal → Adaptio
+        STARTING state.  This exercises the path that was previously missing.
+        """
+        try:
+            reset_plc_weld_signals(setup_plc)
+        except Exception:
+            pass
+
+        # Subscribe and drive to READY
+        initial_state = subscribe_arc_state(web_hmi)
+        if initial_state is None:
+            pytest.skip("Skipping test: device does not support SubscribeArcState")
+
+        wds_id = weld_data_set_setup["wds_id"]
+        result = select_weld_data_set(web_hmi, weld_data_set_id=wds_id)
+        assert result, "Selecting weld data set should succeed"
+
+        if initial_state != "configured":
+            receive_arc_state(web_hmi)  # consume CONFIGURED
+
+        assert simulate_power_sources_ready(setup_plc), "Power sources ready should succeed"
+        time.sleep(0.5)
+        state = receive_arc_state(web_hmi)
+        assert state == "ready", f"Expected 'ready', got '{state}'"
+
+        # Press start via PLC → STARTING
+        assert simulate_weld_start(setup_plc), "Weld start should succeed"
+        time.sleep(0.5)  # allow PLC→Adaptio propagation
+
+        state = receive_arc_state(web_hmi)
+        assert state is not None, "Should receive arc state update after start"
+        logger.info(f"Arc state after start: {state}")
+        assert state == "starting", f"Arc state should transition to 'starting', got '{state}'"
+
+    @pytest.mark.gen2
+    def test_arc_state_active_after_arcing(
+        self, web_hmi: AdaptioWebHmi, setup_plc: PlcJsonRpc, weld_data_set_setup
+    ):
+        """STARTING → ACTIVE when a power source reports ARCING via PLC.
+
+        After the start button is pressed and the weld system begins arcing,
+        the arc state transitions from STARTING to ACTIVE.
+        """
+        try:
+            reset_plc_weld_signals(setup_plc)
+        except Exception:
+            pass
+
+        # Subscribe and drive to STARTING
+        initial_state = subscribe_arc_state(web_hmi)
+        if initial_state is None:
+            pytest.skip("Skipping test: device does not support SubscribeArcState")
+
+        wds_id = weld_data_set_setup["wds_id"]
+        result = select_weld_data_set(web_hmi, weld_data_set_id=wds_id)
+        assert result, "Selecting weld data set should succeed"
+
+        if initial_state != "configured":
+            receive_arc_state(web_hmi)  # consume CONFIGURED
+
+        assert simulate_power_sources_ready(setup_plc), "Power sources ready should succeed"
+        time.sleep(0.5)
+        receive_arc_state(web_hmi)  # consume READY
+
+        assert simulate_weld_start(setup_plc), "Weld start should succeed"
+        time.sleep(0.5)
+        receive_arc_state(web_hmi)  # consume STARTING
+
+        # Power source 1 starts arcing → ACTIVE
+        assert simulate_arcing(setup_plc), "Simulate arcing should succeed"
+        time.sleep(0.5)  # allow PLC→Adaptio propagation
+
+        state = receive_arc_state(web_hmi)
+        assert state is not None, "Should receive arc state update after arcing"
+        logger.info(f"Arc state after arcing: {state}")
+        assert state == "active", f"Arc state should transition to 'active', got '{state}'"
+
+    @pytest.mark.gen2
+    def test_arc_state_ready_after_stop(
+        self, web_hmi: AdaptioWebHmi, setup_plc: PlcJsonRpc, weld_data_set_setup
+    ):
+        """ACTIVE → READY when stop is pressed and arcing ceases.
+
+        The full stop sequence:
+        1. Stop button pressed via PLC (sends stop command to weld system)
+        2. Power source stops arcing (ARCING flag cleared)
+        3. Arc state returns to READY
+
+        This exercises the stop path that was previously not covered.
+        """
+        try:
+            reset_plc_weld_signals(setup_plc)
+        except Exception:
+            pass
+
+        # Subscribe and drive to ACTIVE
+        initial_state = subscribe_arc_state(web_hmi)
+        if initial_state is None:
+            pytest.skip("Skipping test: device does not support SubscribeArcState")
+
+        wds_id = weld_data_set_setup["wds_id"]
+        result = select_weld_data_set(web_hmi, weld_data_set_id=wds_id)
+        assert result, "Selecting weld data set should succeed"
+
+        if initial_state != "configured":
+            receive_arc_state(web_hmi)  # consume CONFIGURED
+
+        assert simulate_power_sources_ready(setup_plc), "Power sources ready should succeed"
+        time.sleep(0.5)
+        receive_arc_state(web_hmi)  # consume READY
+
+        assert simulate_weld_start(setup_plc), "Weld start should succeed"
+        time.sleep(0.5)
+        receive_arc_state(web_hmi)  # consume STARTING
+
+        assert simulate_arcing(setup_plc), "Simulate arcing should succeed"
+        time.sleep(0.5)
+        state = receive_arc_state(web_hmi)
+        assert state == "active", f"Expected 'active', got '{state}'"
+
+        # Stop the weld
+        assert simulate_weld_stop(setup_plc), "Weld stop should succeed"
+        time.sleep(0.5)
+
+        # Clear arcing on power source → READY
+        assert simulate_arcing_stopped(setup_plc), "Clearing arcing should succeed"
+        time.sleep(0.5)
+
+        state = receive_arc_state(web_hmi)
+        assert state is not None, "Should receive arc state update after stop"
+        logger.info(f"Arc state after stop: {state}")
+        assert state == "ready", f"Arc state should transition to 'ready', got '{state}'"
