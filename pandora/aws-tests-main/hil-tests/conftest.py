@@ -854,6 +854,12 @@ def plc_or_none_fixture(request: pytest.FixtureRequest) -> Iterator["PlcJsonRpc 
 
     Use this fixture when a test can run in *simulation mode* (no PLC)
     but should use PLC for explicit state control when available.
+
+    After connecting, the fixture probes a known weld address
+    (``PLC_ADDR_PS1_READY_TO_START``) to verify the PLC program
+    actually exposes the expected data block.  If the address does not
+    exist the PLC cannot drive weld state transitions, so ``None`` is
+    returned and the tests fall back to simulation mode.
     """
     try:
         plc = PlcJsonRpc(url=request.config.PLC_JSON_RPC_URL)
@@ -861,6 +867,29 @@ def plc_or_none_fixture(request: pytest.FixtureRequest) -> Iterator["PlcJsonRpc 
         logger.info("plc_or_none: connected to PLC")
     except Exception as exc:
         logger.info(f"plc_or_none: PLC not available ({exc}), tests will rely on simulation mode")
+        yield None
+        return
+
+    # Verify the PLC program has the weld addresses we need.
+    try:
+        _, err = plc.read(PLC_ADDR_PS1_READY_TO_START)
+        if err:
+            logger.info(
+                f"plc_or_none: weld address probe failed ({err}), "
+                "PLC does not expose weld DB – falling back to simulation mode"
+            )
+            try:
+                plc.logout()
+            except Exception:
+                pass
+            yield None
+            return
+    except Exception as exc:
+        logger.info(f"plc_or_none: weld address probe raised ({exc}), falling back to simulation mode")
+        try:
+            plc.logout()
+        except Exception:
+            pass
         yield None
         return
 
