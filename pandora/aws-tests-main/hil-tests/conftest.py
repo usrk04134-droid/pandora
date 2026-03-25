@@ -1854,8 +1854,6 @@ def simulate_weld_start(plc: "PlcJsonRpc", addresses: dict) -> bool:
     """Press the start button via PLC.
 
     This triggers READY → STARTING in the arc state machine.
-    The PLC ``DataToAdaptio.Adaptio.Start`` address is a pulse (edge-triggered),
-    so we write ``True`` and then ``False`` after a short delay.
     Returns ``True`` on success, ``False`` on failure.
     """
     try:
