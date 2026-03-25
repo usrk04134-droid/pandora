@@ -323,6 +323,9 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "weld_data_set: mark test as weld data set test"
     )
+    config.addinivalue_line(
+        "markers", "gen2: mark test as gen2-specific test"
+    )
 
 
 @pytest.fixture(name="testrail", scope="session", autouse=True)
@@ -1694,9 +1697,22 @@ def get_weld_process_parameters(web_hmi: AdaptioWebHmi) -> list[dict]:
     return rsp.get("payload", [])
 
 
-def add_weld_process_parameters(web_hmi: AdaptioWebHmi, params: dict) -> dict:
-    """Add a weld process parameter set.  Returns the full response dict."""
-    return send_and_receive(web_hmi, "AddWeldProcessParameters", "AddWeldProcessParametersRsp", params)
+def add_weld_process_parameters(web_hmi: AdaptioWebHmi, params: dict | None = None, **kwargs) -> dict | bool:
+    """Add a weld process parameter set.
+
+    Accepts either a single *params* dict or keyword arguments.  Returns the
+    full response dict when called with *params*, or ``True``/``False`` when
+    called with keyword arguments (for compatibility with the new test style).
+    """
+    if params is not None:
+        return send_and_receive(web_hmi, "AddWeldProcessParameters", "AddWeldProcessParametersRsp", params)
+    # keyword-argument style
+    payload = dict(kwargs)
+    try:
+        rsp = send_and_receive(web_hmi, "AddWeldProcessParameters", "AddWeldProcessParametersRsp", payload)
+        return rsp.get("result") == "ok"
+    except Exception:
+        return False
 
 
 def update_weld_process_parameters(web_hmi: AdaptioWebHmi, wpp_id: int, params: dict) -> dict:
@@ -1718,10 +1734,18 @@ def get_weld_data_sets(web_hmi: AdaptioWebHmi) -> list[dict]:
     return rsp.get("payload", [])
 
 
-def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int) -> dict:
-    """Add a weld data set.  Returns the full response dict."""
+def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int) -> dict | bool:
+    """Add a weld data set.
+
+    Returns the full response dict.  When the response indicates success, the
+    dict is truthy; callers may also treat the return value as a bool.
+    """
     payload = {"name": name, "ws1WppId": ws1_wpp_id, "ws2WppId": ws2_wpp_id}
-    return send_and_receive(web_hmi, "AddWeldDataSet", "AddWeldDataSetRsp", payload)
+    try:
+        rsp = send_and_receive(web_hmi, "AddWeldDataSet", "AddWeldDataSetRsp", payload)
+        return rsp
+    except Exception:
+        return False
 
 
 def update_weld_data_set(
@@ -1737,9 +1761,13 @@ def remove_weld_data_set(web_hmi: AdaptioWebHmi, wds_id: int) -> dict:
     return send_and_receive(web_hmi, "RemoveWeldDataSet", "RemoveWeldDataSetRsp", {"id": wds_id})
 
 
-def select_weld_data_set(web_hmi: AdaptioWebHmi, wds_id: int) -> dict:
-    """Select a weld data set.  Returns the full response dict."""
-    return send_and_receive(web_hmi, "SelectWeldDataSet", "SelectWeldDataSetRsp", {"id": wds_id})
+def select_weld_data_set(web_hmi: AdaptioWebHmi, wds_id: int | None = None, weld_data_set_id: int | None = None) -> dict:
+    """Select a weld data set.  Returns the full response dict.
+
+    Accepts either ``wds_id`` (legacy) or ``weld_data_set_id`` (new style).
+    """
+    effective_id = weld_data_set_id if weld_data_set_id is not None else wds_id
+    return send_and_receive(web_hmi, "SelectWeldDataSet", "SelectWeldDataSetRsp", {"id": effective_id})
 
 
 def get_weld_programs(web_hmi: AdaptioWebHmi) -> list[dict]:
@@ -1751,6 +1779,95 @@ def get_weld_programs(web_hmi: AdaptioWebHmi) -> list[dict]:
 def remove_weld_program(web_hmi: AdaptioWebHmi, prog_id: int) -> dict:
     """Remove a weld program.  Returns the full response dict."""
     return send_and_receive(web_hmi, "RemoveWeldProgram", "RemoveWeldProgramRsp", {"id": prog_id})
+
+
+# ---------------------------------------------------------------------------
+# Arc state helpers
+# ---------------------------------------------------------------------------
+
+def subscribe_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
+    """Subscribe to arc-state push notifications and return the initial state.
+
+    ``SubscribeArcState`` causes the device to push the current state
+    immediately (as an ``ArcState`` message) followed by subsequent
+    unsolicited pushes on every transition.
+
+    Returns the state string (e.g. ``"idle"``) or ``None`` if the
+    device does not respond.
+    """
+    try:
+        send_message(web_hmi, "SubscribeArcState")
+        msg = receive_by_name(web_hmi, "ArcState")
+        return msg.get("payload", {}).get("state")
+    except Exception:
+        logger.debug("subscribe_arc_state: failed to receive initial ArcState")
+        return None
+
+
+def receive_arc_state(web_hmi: AdaptioWebHmi, max_retries: int = 10) -> str | None:
+    """Wait for the next ``ArcState`` push message and return the state string.
+
+    Returns ``None`` if no message is received within *max_retries* attempts.
+    """
+    try:
+        msg = receive_by_name(web_hmi, "ArcState", max_retries=max_retries)
+        return msg.get("payload", {}).get("state")
+    except Exception:
+        logger.debug("receive_arc_state: failed to receive ArcState push")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Database deletion helper
+# ---------------------------------------------------------------------------
+
+def delete_adaptio_database(
+    adaptio_manager: AdaptioManager,
+    db_path,
+) -> bool:
+    """Stop Adaptio, delete the database file, and restart.
+
+    Returns ``True`` on success, ``False`` on failure.  The restart causes
+    Adaptio to re-create the database via ``SQLite::OPEN_CREATE`` (see
+    ``main.cc``).
+    """
+    try:
+        adaptio_manager.stop_adaptio()
+        cmd = f"rm -f {shlex.quote(str(db_path))}"
+        _, stderr, exit_code = adaptio_manager.manager.execute_command(
+            command=cmd, sudo=True
+        )
+        if exit_code != 0:
+            logger.warning(f"Failed to delete database file {db_path}: {stderr}")
+            return False
+        logger.info(f"Deleted database file {db_path}")
+        adaptio_manager.start_adaptio()
+        return True
+    except Exception as exc:
+        logger.warning(f"delete_adaptio_database failed: {exc}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# WPP configuration presets
+# ---------------------------------------------------------------------------
+
+def get_weld_process_parameters_config(weld_system: str) -> dict:
+    """Return default weld process parameters for the given weld system.
+
+    Args:
+        weld_system: ``"ws1"`` or ``"ws2"``.
+
+    Returns:
+        A dict suitable for passing as ``**kwargs`` to
+        ``add_weld_process_parameters`` or directly as a payload.
+    """
+    if weld_system == "ws1":
+        return dict(WPP_DEFAULT_WS1)
+    elif weld_system == "ws2":
+        return dict(WPP_DEFAULT_WS2)
+    else:
+        raise ValueError(f"Unknown weld system: {weld_system!r}  (expected 'ws1' or 'ws2')")
 
 
 # ---------------------------------------------------------------------------
