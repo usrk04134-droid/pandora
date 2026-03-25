@@ -1734,18 +1734,16 @@ def get_weld_data_sets(web_hmi: AdaptioWebHmi) -> list[dict]:
     return rsp.get("payload", [])
 
 
-def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int) -> dict | bool:
-    """Add a weld data set.
+def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int) -> dict:
+    """Add a weld data set.  Returns the full response dict.
 
-    Returns the full response dict.  When the response indicates success, the
-    dict is truthy; callers may also treat the return value as a bool.
+    On communication failure returns ``{"result": "fail"}``.
     """
     payload = {"name": name, "ws1WppId": ws1_wpp_id, "ws2WppId": ws2_wpp_id}
     try:
-        rsp = send_and_receive(web_hmi, "AddWeldDataSet", "AddWeldDataSetRsp", payload)
-        return rsp
+        return send_and_receive(web_hmi, "AddWeldDataSet", "AddWeldDataSetRsp", payload)
     except Exception:
-        return False
+        return {"result": "fail"}
 
 
 def update_weld_data_set(
@@ -1765,8 +1763,11 @@ def select_weld_data_set(web_hmi: AdaptioWebHmi, wds_id: int | None = None, weld
     """Select a weld data set.  Returns the full response dict.
 
     Accepts either ``wds_id`` (legacy) or ``weld_data_set_id`` (new style).
+    At least one must be provided.
     """
     effective_id = weld_data_set_id if weld_data_set_id is not None else wds_id
+    if effective_id is None:
+        raise ValueError("Either wds_id or weld_data_set_id must be provided")
     return send_and_receive(web_hmi, "SelectWeldDataSet", "SelectWeldDataSetRsp", {"id": effective_id})
 
 

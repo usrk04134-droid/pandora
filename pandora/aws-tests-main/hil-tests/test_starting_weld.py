@@ -1,4 +1,4 @@
-"""HIL test cases for starting weld – weld data handling and arc state.
+"""HIL test cases for starting weld -- weld data handling and arc state.
 
 Covers adding weld process parameters, creating and selecting weld data sets,
 and verifying arc state transitions through the manual weld state machine:
