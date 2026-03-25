@@ -848,6 +848,24 @@ def setup_plc_fixture(request: pytest.FixtureRequest) -> Iterator[PlcJsonRpc]:
     plc.logout()
 
 
+@pytest.fixture(name="plc_or_none", scope="module")
+def plc_or_none_fixture(request: pytest.FixtureRequest) -> Iterator["PlcJsonRpc | None"]:
+    """Return a connected PLC client, or ``None`` when PLC is unavailable.
+
+    Use this fixture when a test can run in *simulation mode* (no PLC)
+    but should use PLC for explicit state control when available.
+    """
+    try:
+        plc = PlcJsonRpc(url=request.config.PLC_JSON_RPC_URL)
+        plc.login()
+        logger.info("plc_or_none: connected to PLC")
+        yield plc
+        plc.logout()
+    except Exception as exc:
+        logger.info(f"plc_or_none: PLC not available ({exc}), tests will rely on simulation mode")
+        yield None
+
+
 @pytest.fixture(name="reset_slide_cross_positions")
 def reset_slide_cross_positions_fixture(setup_plc: PlcJsonRpc, addresses: dict) -> Iterator[None]:
     """Reset slide cross positions in PLC by homing them to a set position"""
