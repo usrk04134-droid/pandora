@@ -42,7 +42,6 @@ from conftest import (
 from managers import AdaptioManager
 from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi
 from testzilla.plc.plc_json_rpc import PlcJsonRpc
-from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
 
 
 def _find_wpp_ids(web_hmi: AdaptioWebHmi, ws1_name: str, ws2_name: str) -> dict | None:
@@ -56,7 +55,7 @@ def _find_wpp_ids(web_hmi: AdaptioWebHmi, ws1_name: str, ws2_name: str) -> dict 
         if isinstance(wpp, dict):
             wpp_id = wpp.get("id") or wpp.get("wppId") or wpp.get("Id")
             wpp_name = wpp.get("name") or wpp.get("Name")
-            
+
             if wpp_name == ws1_name:
                 ws1_wpp_id = wpp_id
             elif wpp_name == ws2_name:
@@ -75,17 +74,10 @@ def _find_wds_id(web_hmi: AdaptioWebHmi, wds_name: str) -> int | None:
         if isinstance(wds, dict):
             wds_id = wds.get("id") or wds.get("wdsId") or wds.get("Id")
             wds_name_val = wds.get("name") or wds.get("Name")
-            
+
             if wds_name_val == wds_name:
                 return wds_id
     return None
-
-
-@pytest.fixture(name="web_hmi")
-def web_hmi_fixture(request: pytest.FixtureRequest):
-    web_hmi = AdaptioWebHmi(uri=request.config.WEB_HMI_URI)
-    yield web_hmi
-    cleanup_web_hmi_client(web_hmi)
 
 
 @pytest.fixture(name="weld_process_parameters_setup")
