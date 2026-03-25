@@ -235,8 +235,8 @@ class TestStartingWeld:
         if plc is not None:
             try:
                 reset_plc_weld_signals(plc)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"reset_plc_weld_signals failed (non-fatal): {exc}")
 
         # Subscribe and select WDS to reach CONFIGURED
         initial_state = subscribe_arc_state(web_hmi)
@@ -281,8 +281,8 @@ class TestStartingWeld:
         if plc is not None:
             try:
                 reset_plc_weld_signals(plc)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"reset_plc_weld_signals failed (non-fatal): {exc}")
 
         # Subscribe and drive to READY
         initial_state = subscribe_arc_state(web_hmi)
@@ -332,8 +332,8 @@ class TestStartingWeld:
         if plc is not None:
             try:
                 reset_plc_weld_signals(plc)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"reset_plc_weld_signals failed (non-fatal): {exc}")
 
         # Subscribe and drive to STARTING
         initial_state = subscribe_arc_state(web_hmi)
@@ -388,8 +388,8 @@ class TestStartingWeld:
 
         try:
             reset_plc_weld_signals(plc)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"reset_plc_weld_signals failed (non-fatal): {exc}")
 
         # Subscribe and drive to ACTIVE
         initial_state = subscribe_arc_state(web_hmi)

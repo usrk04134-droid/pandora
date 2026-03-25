@@ -859,11 +859,18 @@ def plc_or_none_fixture(request: pytest.FixtureRequest) -> Iterator["PlcJsonRpc 
         plc = PlcJsonRpc(url=request.config.PLC_JSON_RPC_URL)
         plc.login()
         logger.info("plc_or_none: connected to PLC")
-        yield plc
-        plc.logout()
     except Exception as exc:
         logger.info(f"plc_or_none: PLC not available ({exc}), tests will rely on simulation mode")
         yield None
+        return
+
+    try:
+        yield plc
+    finally:
+        try:
+            plc.logout()
+        except Exception as exc:
+            logger.debug(f"plc_or_none: logout failed: {exc}")
 
 
 @pytest.fixture(name="reset_slide_cross_positions")
