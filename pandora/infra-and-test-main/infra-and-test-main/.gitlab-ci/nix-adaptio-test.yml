@@ -1,0 +1,138 @@
+# Template job for Nix based build and run test.
+
+spec:
+  inputs:
+    tags:
+      description: 'The runner selection tags'
+      type: array
+      default:
+        - adaptio-k8-2
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'run-test'
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '90 minutes'
+    job-rules:
+      description: 'The list of rules: for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+    job-dependencies:
+      description: 'The list of dependencies for the job'
+      type: array
+      default: []
+    nix-attribute:
+      description: 'The nix target attribute to build'
+      type: string
+      default: .#
+    post-build-hook:
+      description: 'If true, the post-build hook will be executed'
+      type: string
+      default: 'true'
+    verbose:
+      description: 'If set verbose build output enabled'
+      type: boolean
+      default: false
+    test-target:
+      description: 'The test target to run after build'
+      type: string
+      default: ''
+    test-output:
+      description: 'The test output to use for the job'
+      type: string
+      default: 'test-output.xml'
+    test-log:
+      description: 'The test log file to collect stdout/stderr'
+      type: string
+      default: 'test.log'
+    test-suite:
+      description: 'The test suite name to use for the job'
+      type: string
+      default: 'Unit Test'
+
+---
+include:
+  - local: '/.gitlab-ci/k8-runner-defaults.yml'
+    inputs:
+      post-build-hook: $[[ inputs.post-build-hook ]]
+      job-name-suffix: $[[ inputs.job-name ]]
+
+'$[[ inputs.job-name ]]':
+  extends: '.k8-adaptio-$[[ inputs.job-name ]]'
+  tags: $[[ inputs.tags ]]
+  stage: test
+  timeout: $[[ inputs.job-timeout ]]
+  dependencies: $[[ inputs.job-dependencies ]]
+  rules: $[[ inputs.job-rules ]]
+  variables:
+    TESTRAIL_SECTION_NAME: $[[ inputs.test-suite ]]
+  artifacts:
+    when: always
+    paths:
+      - $[[ inputs.test-output ]]
+      - $[[ inputs.test-log ]]
+    reports:
+      junit: $[[ inputs.test-output ]]
+    expire_in: 2 weeks
+  script:
+    - !reference [.fetch-scripts, script]
+    - VERBOSE=""
+    - if $[[ inputs.verbose ]]; then VERBOSE="-vv"; fi
+
+    - source $GITLAB_SHARED_FUNCS
+
+    - section_start fetch_cache "Test-Nix; fetch nix dependencies" true
+    # Fetch from cache separately from building, to get individual timing measurements for each
+    - section_start dry_run "Test-Nix; dry-run" true
+    - nix build $[[ inputs.nix-attribute ]] --dry-run
+    - section_end dry_run
+    # Set remote and local builders to 0 to force build step to fail / be skipped
+    - >
+      nix build $[[ inputs.nix-attribute ]]
+      --print-out-paths
+      --log-format bar-with-logs
+      $VERBOSE
+      --option max-jobs 0
+      --option builders ''
+      || true
+    - echo 'The error "Unable to start any build; ..." above is expected and OK!'
+    - section_end fetch_cache
+
+    - section_start build "Test-Nix; build" true
+    - >
+      nix build $[[ inputs.nix-attribute ]]
+      --print-out-paths
+      --log-format bar-with-logs
+      $VERBOSE
+    - section_end build
+    - section_start tests "Test-Nix; run" true
+    - TEST_LOG=${CI_PROJECT_DIR}/$[[ inputs.test-log ]]
+    - EXIT_CODE=0
+    - set -o pipefail
+    - >
+      ./result/bin/$[[ inputs.test-target ]] \
+        --doctest-no-colors \
+        --doctest-minimal \
+        --doctest-reporters=junit \
+        --doctest-out=${CI_PROJECT_DIR}/$[[ inputs.test-output ]] \
+        2>&1 | tee ${TEST_LOG} || EXIT_CODE=$?;
+    - sed -i -n '/<testsuites>/,/<\/testsuites>/p' ${CI_PROJECT_DIR}/$[[ inputs.test-output ]]
+    - section_end tests
+
+    - section_start export_testrail "Export results to TestRail" true
+    - ls -la $SCRIPTS_DIR/
+    - |
+      if [ -n "${CI_COMMIT_TAG}" ]; then
+        echo "TAG detected - exporting results to TestRail"
+        $SCRIPTS_DIR/export-test-result.sh \
+          --report ${CI_PROJECT_DIR}/$[[ inputs.test-output ]] || echo "TestRail export failed, continuing..."
+      else
+        echo "Not a tag - skipping TestRail export"
+      fi
+    - section_end export_testrail
+
+    - exit $EXIT_CODE

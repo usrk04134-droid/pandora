@@ -1,0 +1,22 @@
+[project]
+name = "gl_metrics"
+version = "0.1.0"
+description = "Collect GitLab test reports and push to Prometheus Pushgateway"
+requires-python = ">=3.12"
+[project.scripts]
+gl-metrics = "gl_metrics.main:main"
+
+dependencies = [
+    "requests>=2.32.5",
+    "prometheus-client>=0.24.1",
+    "python-gitlab>=8.1.0",
+    "python-dotenv>=1.2.2",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+pythonpath = ["src"]
+addopts = ["-ra", "-q", "--import-mode=importlib"]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_functions = ["test_*"]

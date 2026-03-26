@@ -1,0 +1,22 @@
+kind: TestManifest
+test_environment:
+  type: 'container_registry'
+  registry_path: 'esab/abw/infra-and-test/test-env'
+  version: '1.0.2'
+tests:
+  source:
+    type: 'git'
+    repository: 'esab/abw/aws-tests'
+    branch: 'main'
+    commit: '4fc2d0ab4cc01eee02d25a02f3cf12364a936647'
+  paths:
+    - 'hil-tests'
+system_manifest:
+  source:
+    type: 'git'
+    repository: 'esab/abw/aws-architecture'
+    branch: 'main'
+    version: 'LP3-rc.52'
+  path: 'realized_systems/system-manifest-hil.yaml'
+metadata:
+  description: 'Test manifest for Adaptive Welding System Tests.'

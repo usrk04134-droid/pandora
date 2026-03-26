@@ -1,0 +1,73 @@
+spec:
+  inputs:
+    tags:
+      description: 'The runner selection tags'
+      type: array
+      default:
+        - smalls
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'pytest'
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '1 hour'
+    pyproject-toml-path:
+      description: 'Path to the pyproject.toml file'
+      type: string
+      default: '.'
+    job-rules:
+      description: 'The list of rules: for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          changes:
+            - '**/*.py'
+            - '**/pyproject.toml'
+            - '**/requirements*.txt'
+            - 'src/*'
+            - 'tests/**/*'
+        - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CI_COMMIT_REF_PROTECTED == "true"'
+    test-path:
+      description: 'Path to the test directory or files'
+      type: string
+      default: 'tests'
+    job-artifacts-paths:
+      description: 'The list of artifacts:paths: for the job'
+      type: array
+      default:
+        - ${CI_PROJECT_DIR}/report_*.xml
+        - ${CI_PROJECT_DIR}/logs/*
+    job-artifacts-report-path:
+      description: 'The list of artifacts:paths: for the job'
+      type: string
+      default: '${CI_PROJECT_DIR}/report_*.xml'
+---
+'$[[ inputs.job-name ]]':
+  image: registry.gitlab.com/esab/abw/infra-and-test/pytest:0.1.0
+  tags: $[[ inputs.tags ]]
+  stage: test
+  timeout: $[[ inputs.job-timeout ]]
+  rules: $[[ inputs.job-rules ]]
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start install_dependencies "Install python dependencies" true
+    - python -m pip install -e $[[ inputs.pyproject-toml-path ]]
+    - section_end install_dependencies
+  script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start pytest "Run tests" true
+    - >
+      pytest ${CI_PROJECT_DIR}/$[[ inputs.test-path ]]
+      --capture=no
+      --junitxml=report_$(date +%Y-%m-%d_%T).xml
+      --verbose
+      -r A
+    - section_end pytest
+  artifacts:
+    when: always
+    reports:
+      junit: $[[ inputs.job-artifacts-report-path ]]
+    paths: $[[ inputs.job-artifacts-paths ]]
+    expire_in: 1 month

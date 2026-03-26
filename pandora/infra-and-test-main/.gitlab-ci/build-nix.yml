@@ -73,6 +73,10 @@ include:
 
     - source $GITLAB_SHARED_FUNCS
 
+    - section_start flake_check "Build-Nix; validate flake" true
+    - nix flake check
+    - section_end flake_check
+
     - section_start fetch_cache "Build-Nix; fetch nix dependencies" true
     # Fetch from cache separately from building, to get individual timing measurements for each
     - section_start dry_run "Build-Nix; dry-run" true

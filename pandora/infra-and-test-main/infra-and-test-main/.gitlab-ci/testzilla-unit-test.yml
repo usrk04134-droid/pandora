@@ -1,0 +1,38 @@
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'testzilla-unit-test'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          changes:
+            - 'test/testzilla/**/*.py'
+            - 'test/unit_tests/**/*.py'
+            - '.gitlab-ci/testzilla-unit-test.yml'
+---
+'$[[ inputs.job-name ]]':
+  rules: $[[ inputs.job-rules ]]
+  image: registry.gitlab.com/esab/abw/infra-and-test/test-env:1.3.1
+  tags: [smalls]
+  stage: test
+  script:
+    - >
+      pytest ${CI_PROJECT_DIR}/test/unit_tests
+      --junitxml=report_$(date +%Y-%m-%d_%T).xml
+      --cov=${CI_PROJECT_DIR}/test/testzilla
+      --cov-report=xml:coverage.xml
+      --cov-fail-under=80
+      --verbose
+  artifacts:
+    when: always
+    reports:
+      junit: ${CI_PROJECT_DIR}/report_*.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: ${CI_PROJECT_DIR}/coverage.xml
+    expire_in: 1 month
+  coverage: /Total.*?(100(?:\.0+)?\%|\d{1,2}(?:\.\d+)?\%)$/ # Based on https://docs.gitlab.com/ci/testing/code_coverage/#coverage-regex-patterns

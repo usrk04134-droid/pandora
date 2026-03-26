@@ -1,0 +1,101 @@
+### Laser To Torch Calibration ###
+laser_to_torch_calibration:
+ stickout: 11
+ laser_to_torch_distance: 158
+ scanner_mount_angle: 0.5235987755982988
+
+lw_calibration_1751026725959:
+ stickout: 25
+ laser_to_torch_distance: 350
+ scanner_mount_angle: 0.099483777
+ wire_diameter: 4
+ 
+### Joint Geometry ###
+lw_joint_geometry_1751026725959:
+ upper_joint_width: 64.0
+ groove_depth: 44.0
+ left_wall_angle: 0.5235987755982988
+ right_wall_angle: 0.5235987755982988
+ left_max_surface_angle: 0.34906585
+ right_max_surface_angle: 0.34906585
+
+cw_joint_geometry::
+ upper_joint_width: 58
+ groove_depth: 40
+ left_wall_angle: 0.52
+ right_wall_angle: 0.52
+ left_max_surface_angle: 0.34906585
+ right_max_surface_angle: 0.34906585
+
+### Weld Process Parameters ###
+weld_process_parameters_ws1:
+  name: ManualWS1
+  method: dc
+  regulationType: cc
+  startAdjust: 10
+  startType: scratch
+  voltage: 25.0
+  current: 200.0
+  wireSpeed: 15.0
+  iceWireSpeed: 0.0
+  acFrequency: 60.0
+  acOffset: 1.2
+  acPhaseShift: 0.5
+  craterFillTime: 2.0
+  burnBackTime: 1.0
+
+weld_process_parameters_ws2:
+ name: ManualWS2
+ method: dc
+ regulationType: cc
+ startAdjust: 10
+ startType: direct
+ voltage: 28.0
+ current: 180.0
+ wireSpeed: 14.0
+ iceWireSpeed: 0.0
+ acFrequency: 60.0
+ acOffset: 1.2
+ acPhaseShift: 0.5
+ craterFillTime: 2.0
+ burnBackTime: 1.0
+
+weld_process_parameters_ws1_updated:
+  name: ManualWS1_Updated
+  method: dc
+  regulationType: cc
+  startAdjust: 15
+  startType: direct
+  voltage: 26.5
+  current: 210.0
+  wireSpeed: 16.0
+  iceWireSpeed: 0.0
+  acFrequency: 55.0
+  acOffset: 1.5
+  acPhaseShift: 0.6
+  craterFillTime: 2.5
+  burnBackTime: 1.5
+
+### ABP - General ###
+abp:
+ general:
+  bead_switch_angle: 25
+  bead_switch_overlap: 5
+### ABP - Fill ###
+ fill:
+  wall_offset: 5
+  step: 0.5
+  weld_speed:
+   min: 80
+   max: 100
+  heat_input:
+   min: 2.20
+   max: 3.30
+  weld_system_2_current:
+   min: 650
+   max: 850
+### ABP - Cap ###
+ cap:
+  cap_beads: 5
+  cap_corner_offset: 8
+  cap_init_depth: 6

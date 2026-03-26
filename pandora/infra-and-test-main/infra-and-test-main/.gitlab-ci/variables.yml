@@ -1,0 +1,11 @@
+variables:
+  BOLD: "\x1b[1m"
+  BLUE: "\x1b[94m"
+  RED: "\x1b[91m"
+  GREEN: "\x1b[92m"
+  YELLOW: "\x1b[93m"
+  RESET: "\x1b[0m"
+  AFTER_SCRIPT_IGNORE_ERRORS: false
+  SERVICE_ACCOUNT_USER_NAME: "mechagodzilla"
+  SERVICE_ACCOUNT_EMAIL: "service_account_group_3957900_9bf84fa890abe7dd0a5fb7514be106f9@noreply.gitlab.com"
+  NIX_CURL_FLAGS: "--http1.1 --retry 5 --retry-delay 2 --retry-connrefused"

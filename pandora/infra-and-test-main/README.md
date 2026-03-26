@@ -20,6 +20,9 @@ Welcome to the wonderful world of infrastructure and test :-)
       - [Installation](#installation)
       - [Editing secrets](#editing-secrets)
       - [Adding encryption keys](#adding-encryption-keys)
+   - [Markdown Linter and Formatter](#markdown-linter-and-formatter)
+      - [Markdown Linter](#markdown-linter)
+      - [Markdown Formatter](#markdown-formatter)
    - [Ruff: Python Linter and Formatter](#ruff-python-linter-and-formatter)
       - [Ruff Introduction](#ruff-introduction)
       - [Ruff Installation](#ruff-installation)
@@ -234,6 +237,38 @@ This is done by issueing the following command:
 
 ```bash
 sops updatekeys secrets.yaml
+```
+
+## Markdown Linter and Formatter
+
+The pipeline uses `markdownlint-cli2` with this config: [container_files/markdownlint_cli2/.markdownlint-cli2.yaml](container_files/markdownlint_cli2/.markdownlint-cli2.yaml).
+
+> [!note]
+> The local `nix run .#mdlint` and `nix run .#mdformat` commands use the same lint rules as CI,
+> but automatically ignore `outputFormatters` entries because those formatter plugins are not packaged in nixpkgs.
+
+### Markdown Linter
+
+Run markdown lint locally before push:
+
+```bash
+# Lint all markdown files in the repository
+nix run .#mdlint
+
+# Lint specific file(s) or paths
+nix run .#mdlint -- README.md ADRs/**/*.md
+```
+
+### Markdown Formatter
+
+Auto-fix markdown issues that `markdownlint-cli2` can fix:
+
+```bash
+# Fix all markdown files in the repository
+nix run .#mdformat
+
+# Fix specific file(s) or paths
+nix run .#mdformat -- README.md ADRs/**/*.md
 ```
 
 ## Ruff: Python Linter and Formatter

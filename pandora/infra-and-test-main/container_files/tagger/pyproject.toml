@@ -1,6 +1,6 @@
 [project]
 name = "tagger"
-version = "1.1.4"
+version = "1.1.5"
 description = "Semver tagging"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,7 +9,7 @@ dependencies = [
     "python-gitlab==5.6.0",
     "gitpython==3.1.44",
     "toml==0.10.2",
-    "laserbeak==1.0.0",
+    "laserbeak==1.0.2",
 ]
 
 [project.optional-dependencies]

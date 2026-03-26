@@ -1,0 +1,43 @@
+spec:
+  inputs:
+    post-build-hook:
+      description: 'If true, the post-build hook will be executed'
+      type: string
+      default: 'true'
+---
+include:
+  - local: /.gitlab-ci/variables.yml
+
+# NOTE: The local definitions takes precendence
+# E.g. if a local before_script is defined it would take precendence over this definition.
+# In that case use a gitlab reference like: !reference [.hil-runner-defaults, before_script]
+.hil-nix-defaults:
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start nix_cache_preparations "Hil based nix cache preparations in nix.conf" true
+    - export HIL_CACHE_PUB_KEY="$(cat $HIL_CACHE_PUB_KEY_FILE)"
+    - |
+      cat >> /etc/nix/nix.conf << EOF
+      extra-substituters = $HIL_CACHE_URL
+      extra-trusted-public-keys = $HIL_CACHE_PUB_KEY
+      secret-key-files = $HIL_CACHE_SIGNING_KEY_FILE
+      EOF
+
+      if [[ "$POST_BUILD_HOOK" == "true" ]]; then
+        echo "post-build-hook = $HIL_CACHE_BUILD_HOOK_FILE" >> /etc/nix/nix.conf
+        chmod +x $HIL_CACHE_BUILD_HOOK_FILE
+      fi
+    - section_end nix_cache_preparations
+
+.hil-runner-defaults:
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start gitlab_ssh_key_preparations "GitLab SSH key preparations" true
+    - export TARGET_HOST="192.168.101.151"
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan "$TARGET_HOST" > ~/.ssh/known_hosts || { log_error "ssh-keyscan failed, make sure $TARGET_HOST is reachable"; exit 1; }
+    - chmod 644 ~/.ssh/known_hosts
+    - section_end gitlab_ssh_key_preparations
+    - POST_BUILD_HOOK=$[[ inputs.post-build-hook ]]
+    - !reference [.hil-nix-defaults, before_script]

@@ -1,0 +1,111 @@
+\documentclass[12pt,a4paper]{report}
+
+%------------------------------------------------
+% Packages
+%------------------------------------------------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lipsum}        % For placeholder text
+\usepackage{hyperref}      % Clickable references
+\usepackage{graphicx}      % Images
+\usepackage{amsmath}       % Math support
+\usepackage{amssymb}
+\usepackage{setspace}      % Line spacing
+\usepackage{geometry}      % Page margins
+\usepackage{graphicx}
+\geometry{margin=1in}
+
+%------------------------------------------------
+% Document
+%------------------------------------------------
+\begin{document}
+
+%------------------------
+% Title Page
+%------------------------
+\begin{titlepage}
+    \centering
+
+    {\Huge \textbf{Adaptivity report}\par}
+    \vspace{1.5cm}
+    \date{\today}
+
+    {\Large Adam Adaptiosson\par}
+    \vspace{0.5cm}
+
+    \vfill
+
+    % --- Your custom text here ---
+    \begin{center}
+    \textbf{Weld control log:}\\[4pt]
+    \texttt{\detokenize{{log_file}}}
+    \end{center}
+
+    \vspace{1cm}
+
+    % optional footer
+    {\small ESAB Automation Adaptio Team}
+
+\end{titlepage}
+
+
+\newpage
+
+%------------------------------------------------
+\section{Profile data}
+The following deposition sequences are constructed from laser scanner profiles and then color coded 
+based on the logged welding parameters.
+
+\subsection{Color scheme}
+Parameters are mapped linearly to color. 64 colors are used. Parameter ranges are configurable. If the parameters of a
+bead are mapped to outside a valid range they will have get the color white (below valid range) or the color black (above valid range).
+
+\subsection{Coordinate system}
+The coordinate system used is the weld object coordiante system (ROCS) with origin on the rotation axis. The plot coordinate are
+cylindrical, so the MCS x and z coordinates of the logged profiles have been transformed to ROCS and converted to cylindrical. 
+The plots basically show radial cross-sections.
+
+\subsection{Torch position}
+The wire tip position for each bead and position is plotted as a circle with white background. The exact position should be interpreted with 
+caution since it requires that the stickout configured in the plot script is identical to the stickout used during welding.
+
+\subsection{Bead detection}
+In order to reduce the occurence of near but not perfect overlapping scan profiles the scan data is filtered through
+a bead detection algorithm. This algorithm tries to identify the contiguous region associated with a bead. Within the bead region
+the two subsequent profiles are expected to differ significantly. Outside the bead region the profiles should ideally be identical, but in reality
+they differ slightly due to inaccuracy in position etc. The bead detection algorithm creates a filtered version of the current profile. Points in
+the bead region is taken from the current profile and points outside the bead region is taken from the reference (previous) profile.
+It is important to note that flux grains present in the profiles appear as spikes and these can distrupt the bead detection algorithm.
+
+\subsection{Bead switch region}
+In the bead switch region, where the torch crosses over from one wall to the other, the plots will be difficult to interpret. This usually
+occurs around position = 0 degrees.
+
+\subsection{Overlap region}
+After welding a full revolution, the torch is not moved immediately to a new position. There is an overlap such that weld metal will 
+be deposited on top of the just welded bead. This overlap region is a few cm long and can sometimes be seen in the plots.
+
+\subsection{Last bead}
+If weld movement is stopped when the last bead is finshed, there will be no scan data for the last bead. This is because the scanner reads
+the joint before the torch and therefore have not "seen" the last bead yet.
+
+\subsection{Blind spot}
+The region between the laser line and the torch at the start of welding will never be observed by the scanner. This part of the weld is missing
+from the logs. This will appear as a strange joint bottom for positions close to 360 degrees. In this region, what is actually the first bead,
+will be interpreted as joint bottom and therefore colored gray.
+
+\subsection{Notes on accuracy}
+During acqusition of scanner data, the weld object drifts and deforms due to heat etc. This means that the profiles from subsequent
+revolutions will not perfectly align and can therefore not be plotted on top of each other in a meaningful way.
+In order to be able to plot all the beads aligned w.r.t the "ideal" joint, the laser profiles are translated, rotated and deformed
+slightly. Usually these profile alterations are of a sub-millimeter magnitude. 
+
+Another source of error is the mapping of logged welding parameters to the logged laser profiles. Since the scanner observes the
+joint almost a full revolution after the deposition has been made, the corresponding welding parameters must be gotten from another
+location in the log. In order to do this, the log parser must have been given information about the weld object calibration so that
+it can compute the rotation angle between laser line and torch plane.
+
+
+{figures}
+
+\end{document}

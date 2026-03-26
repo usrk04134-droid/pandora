@@ -1,0 +1,18 @@
+# This pipeline configuration is specifically for triggered pipelines from infra-and-test
+# It runs HIL tests when triggered from infra-and-test
+# This file is conditionally included in .gitlab-ci.yml when PIPELINE_ENV == "stage"
+
+include:
+  - project: 'esab/abw/infra-and-test'
+    ref: $TEMPLATE_REPO_BRANCH
+    file: '/.gitlab-ci/hil-test.yml'
+    inputs:
+      job-name: 'hil-test:stage'
+      job-tags:
+        - 'hil-chn-01'
+      job-rules:
+        - when: always
+      pytest-extra-args: >
+        --clean-logs
+        --collect-logs
+        --testrail

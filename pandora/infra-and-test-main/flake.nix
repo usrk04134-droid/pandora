@@ -166,6 +166,46 @@
             ${customGitlint}/bin/gitlint --config ${customGitlint}/${gitlintPaths.config}/.gitlint "$@"
           '';
 
+          mdlint = pkgs.writeShellScriptBin "mdlint" ''
+            config="${./container_files/markdownlint_cli2/.markdownlint-cli2.yaml}"
+            local_config="$(mktemp /tmp/mdlint.XXXXXX.markdownlint-cli2.yaml)"
+
+            # CI config references formatter plugins that are not packaged in nixpkgs.
+            # Keep all lint rules, but drop outputFormatters for local usage.
+            awk '
+              /^outputFormatters:/ { skip = 1; next }
+              skip && /^[^[:space:]]/ { skip = 0 }
+              !skip { print }
+            ' "$config" > "$local_config"
+            trap 'rm -f "$local_config"' EXIT
+
+            if [[ $# -eq 0 ]]; then
+              set -- "**/*.md"
+            fi
+
+            ${pkgs.markdownlint-cli2}/bin/markdownlint-cli2 --config "$local_config" "$@"
+          '';
+
+          mdformat = pkgs.writeShellScriptBin "mdformat" ''
+            config="${./container_files/markdownlint_cli2/.markdownlint-cli2.yaml}"
+            local_config="$(mktemp /tmp/mdformat.XXXXXX.markdownlint-cli2.yaml)"
+
+            # CI config references formatter plugins that are not packaged in nixpkgs.
+            # Keep all lint rules, but drop outputFormatters for local usage.
+            awk '
+              /^outputFormatters:/ { skip = 1; next }
+              skip && /^[^[:space:]]/ { skip = 0 }
+              !skip { print }
+            ' "$config" > "$local_config"
+            trap 'rm -f "$local_config"' EXIT
+
+            if [[ $# -eq 0 ]]; then
+              set -- "**/*.md"
+            fi
+
+            ${pkgs.markdownlint-cli2}/bin/markdownlint-cli2 --fix --config "$local_config" "$@"
+          '';
+
           eslint = pkgs.nodePackages.eslint;
           prettier = pkgs.nodePackages.prettier;
           typescript = pkgs.nodePackages.typescript;

@@ -1,0 +1,32 @@
+// Copy inside .devcontainer/ as devcontainer.json
+{
+  "name": "AWS Platform",
+  "dockerFile": "./Dockerfile",
+  "build": {
+    "args": {
+      "UID": "1000",
+      "GID": "1000",
+      "UNAME": "${localEnv:USER}"
+    }
+  },
+  "containerEnv": {
+    "GITLAB_TOKEN": "${localEnv:GITLAB_TOKEN}",
+    "WORKSPACE": "${containerWorkspaceFolder}",
+    "WORKSPACE_NAME": "${localWorkspaceFolderBasename}"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder}/,target=/aws-platform,type=bind",
+  "workspaceFolder": "/aws-platform",
+  "remoteUser": "${localEnv:USER}",
+  "runArgs": [
+    "--network=host",
+    "--cap-add=NET_ADMIN",
+    "--security-opt=seccomp=unconfined"
+  ],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "window.title": "${dirty}${separator}${localWorkspaceFolderBasename} — ${rootName}${separator}${activeEditorShort}"
+      }
+    }
+  }
+}

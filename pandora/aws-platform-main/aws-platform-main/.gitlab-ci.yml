@@ -1,0 +1,157 @@
+variables:
+  PIPELINE_ENV: ''  # Will be set to "stage" when triggered from infra-and-test
+
+include:
+  - local: '.gitlab-ci/stage-pipeline.yml'
+    rules:
+      - if: '$PIPELINE_ENV == "stage"'
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file:
+      - '/.gitlab-ci/lint-commit.yml'
+      - '/.gitlab-ci/lint-markdown-cli2.yml'
+      - '/.gitlab-ci/lint-python.yml'
+      - '/.gitlab-ci/lint-shellscript.yml'
+      - '/.gitlab-ci/semver-version.yml'
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file: '/.gitlab-ci/build-and-push-image.yml'
+    inputs:
+      job-matrix:
+        - IMG_NAME: aws-platform-env
+          IMG_FILES: '.'
+      job-rules:
+        - if: '$PIPELINE_ENV == "stage"'
+          when: never
+        - if: '$CI_COMMIT_TAG'
+          when: never
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_REF_PROTECTED == "true"'
+          changes:
+            - Dockerfile
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file: '/.gitlab-ci/plc-apax-build.yml'
+    inputs:
+      image-version: '1.0.1'
+      login-token: $PLC_APAX_TOKEN
+      job-rules:
+        - if: '$CI_COMMIT_TAG && $CI_COMMIT_TITLE =~ /^chore\(semver\): Bump.*/'
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          changes:
+            - src/**/*
+            - configurations/**/*
+      job-matrix:
+        - PLC_CONFIG: ''
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file: '/.gitlab-ci/plc-apax-test.yml'
+    inputs:
+      image-version: '1.0.1'
+      login-token: $PLC_APAX_TOKEN
+      job-rules:
+        - if: '$CI_COMMIT_TAG && $CI_COMMIT_TITLE =~ /^chore\(semver\): Bump.*/'
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          changes:
+            - src/**/*
+            - test/**/*
+
+  - project: 'esab/abw/infra-and-test'
+    ref: main
+    file: '/.gitlab-ci/plc-apax-deploy.yml'
+    inputs:
+      image-version: '1.0.1'
+      login-token: $PLC_APAX_TOKEN
+      plc-config: 'hil'
+      job-rules:
+        - if: '$CI_COMMIT_TAG && $CI_COMMIT_TITLE =~ /^chore\(semver\): Bump.*/'
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          changes:
+          - src/**/*
+          - configurations/**/*
+      job-tags:
+        - 'hil-gbg-02'
+      when: 'manual'
+
+workflow:
+  name: '$PIPELINE_NAME'
+  auto_cancel:
+    on_new_commit: conservative
+  rules:
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_TITLE =~ /^chore\(semver\): Bump.*/'
+      variables:
+        PIPELINE_NAME: 'Pipeline for new version: $CI_COMMIT_REF_NAME'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      variables:
+        PIPELINE_NAME: 'MR pipeline: $CI_MERGE_REQUEST_TITLE'
+    - if: '$CI_PIPELINE_SOURCE == "pipeline"'
+      variables:
+        PIPELINE_NAME: 'Triggered by pipeline for branch: $CI_COMMIT_REF_NAME'
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TITLE !~ /^chore\(semver\): Bump.*/'
+      variables:
+        PIPELINE_NAME: 'Pipeline for protected branch: $CI_COMMIT_REF_NAME'
+
+stages:
+  - lint
+  - check
+  - build
+  - test
+  - deploy
+
+# This will override parts of the included "semver-merge-commit" job.
+# The reason for this is that the included job uses a version.txt file
+# to store the version, while this job uses apax.yml.
+semver-merge-commit:
+  script:
+    - section_start analyze_commit "Analyze commit(s) to decide if a new version is needed" true
+    - !reference [.tagger-analyze, script]
+    - section_end analyze_commit
+    - section_start commit_and_tag "Commit and tag new version" true
+    - |
+      if [[ -n "$SEMVER_BUMP" && -n "$SEMVER_VERSION" ]]; then
+        current_version=$(yq -r '.version' apax.yml)
+
+        if [[ "$current_version" != "${SEMVER_VERSION}" ]]; then
+          set -- $(printf '%s\n' "${SEMVER_VERSION}" | sed -n 's/^\([0-9]\+\)\.\([0-9]\+\)\.\([0-9]\+\).*/\1 \2 \3/p')
+
+          SEMVER_MAJOR=$1
+          SEMVER_MINOR=$2
+          SEMVER_PATCH=$3
+
+          echo -e "${BOLD}${BLUE}$(date "+%Y-%m-%d %T") - Update apax.yml with ${SEMVER_VERSION}${RESET}"
+          sed -i "s/^version: .*/version: $SEMVER_VERSION/" apax.yml
+          git add apax.yml
+          echo -e "${BOLD}${BLUE}$(date "+%Y-%m-%d %T") - Update apax-lock.json with ${SEMVER_VERSION}${RESET}"
+          tmp=$(mktemp)
+          jq ".version = \"${SEMVER_VERSION}\"" apax-lock.json > "$tmp"
+          mv "$tmp" apax-lock.json
+          jq ".root.version = \"${SEMVER_VERSION}\"" apax-lock.json > "$tmp"
+          mv "$tmp" apax-lock.json
+          git add apax-lock.json
+
+          echo -e "${BOLD}${BLUE}$(date "+%Y-%m-%d %T") - Update PlatformVersion with ${SEMVER_VERSION}${RESET}"
+          sed -E -i "s/(PlatformVersion : STRING).*;/\1[${#SEMVER_VERSION}] := '${SEMVER_VERSION}';/g" configurations/PlatformVersion.st
+
+          echo -e "${BOLD}${BLUE}$(date "+%Y-%m-%d %T") - Update PlatformVersionMajor with ${SEMVER_MAJOR}${RESET}"
+          sed -E -i "s/(PlatformVersionMajor.*);/PlatformVersionMajor : UINT := UINT#${SEMVER_MAJOR};/g" configurations/PlatformVersion.st
+
+          echo -e "${BOLD}${BLUE}$(date "+%Y-%m-%d %T") - Update PlatformVersionMinor with ${SEMVER_MINOR}${RESET}"
+          sed -E -i "s/(PlatformVersionMinor.*);/PlatformVersionMinor : UINT := UINT#${SEMVER_MINOR};/g" configurations/PlatformVersion.st
+
+          echo -e "${BOLD}${BLUE}$(date "+%Y-%m-%d %T") - Update PlatformVersionPatch with ${SEMVER_PATCH}${RESET}"
+          sed -E -i "s/(PlatformVersionPatch.*);/PlatformVersionPatch : UINT := UINT#${SEMVER_PATCH};/g" configurations/PlatformVersion.st
+
+          git add configurations/PlatformVersion.st
+          git commit -m "chore(semver): Bump $SEMVER_BUMP version to $SEMVER_VERSION" -m "Issues: NONE"
+          git push origin ${CI_COMMIT_BRANCH}
+          echo -e "${BOLD}${BLUE}$(date "+%Y-%m-%d %T") - Add new version tag: ${SEMVER_VERSION}${RESET}"
+          git tag -a "${SEMVER_VERSION}" -m "Version ${SEMVER_VERSION}"
+          git push origin "${SEMVER_VERSION}"
+        else
+          echo -e "${BOLD}${YELLOW}$(date "+%Y-%m-%d %T") - apax.yml already contains ${SEMVER_VERSION}, no update needed.${RESET}"
+        fi
+      fi
+    - section_end commit_and_tag

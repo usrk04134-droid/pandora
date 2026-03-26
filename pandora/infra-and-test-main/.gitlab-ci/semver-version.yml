@@ -25,7 +25,7 @@ include:
   - local: /.gitlab-ci/common.yml
 
 variables:
-  TAGGER_IMG_VERSION: '1.1.0'
+  TAGGER_IMG_VERSION: '1.1.6'
   ISSUE_ID: 'ADT-2527'
 
 .semver-artifacts:
@@ -90,7 +90,7 @@ variables:
 semver-merge-request:
   rules:
     - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_PROTECTED == "true"'
-  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:$TAGGER_IMG_VERSION
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.6
   tags: [smalls]
   stage: .pre
   extends: .semver-artifacts
@@ -122,7 +122,7 @@ semver-merge-commit:
         && $CI_COMMIT_REF_PROTECTED == "true"
         && $CI_COMMIT_TITLE !~ /^chore\(semver\): Bump.*/' # Note! If the version file commit message is changed it might affect this rule!
     - when: never
-  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:$TAGGER_IMG_VERSION
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.6
   tags: [smalls]
   stage: .pre
   extends: .semver-artifacts

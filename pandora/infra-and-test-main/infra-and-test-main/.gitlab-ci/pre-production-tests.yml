@@ -1,0 +1,223 @@
+spec:
+  inputs:
+    tags:
+      description: 'The runner selection tags'
+      type: array
+      default:
+        - smalls
+---
+validate-gitlint-image:
+  tags: $[[ inputs.tags ]]
+  stage: test
+  image: $CI_REGISTRY_IMAGE/${NAME_AND_TAG}
+  needs:
+    - job: 'build-and-push-image: [gitlint, container_files/gitlint]'
+      artifacts: true
+  variables:
+    GIT_DEPTH: 0
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      when: manual
+      changes:
+        - container_files/gitlint/**/*{[^d],[^m]d,[^.]md}
+  script:
+    - echo "Testing image $CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+    - gitlint --commits HEAD...${CI_MERGE_REQUEST_DIFF_BASE_SHA}
+
+validate-ruff-image:
+  tags: $[[ inputs.tags ]]
+  stage: test
+  image: $CI_REGISTRY_IMAGE/${NAME_AND_TAG}
+  needs:
+    - job: 'build-and-push-image: [ruff, container_files/ruff]'
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      when: manual
+      changes:
+        - container_files/ruff/**/*{[^d],[^m]d,[^.]md}
+  script:
+    - echo "Testing image $CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+    - |
+      # Test ruff by verifying config and showing settings (dry-run)
+      ruff check --config /etc/opt/ruff.toml --show-settings
+      echo "Ruff image validation successful"
+
+validate-eslint-image:
+  tags: $[[ inputs.tags ]]
+  stage: test
+  image: $CI_REGISTRY_IMAGE/${NAME_AND_TAG}
+  needs:
+    - job: 'build-and-push-image: [eslint, container_files/eslint]'
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      when: manual
+      changes:
+        - container_files/eslint/**/*{[^d],[^m]d,[^.]md}
+  script:
+    - echo "Testing image $CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+    - |
+      # Test eslint by validating config
+      eslint --version
+      # Create a test JS file and lint it with the config
+      echo 'const x = 1;' > /tmp/test.js
+      eslint --config /etc/opt/eslint.config.mjs /tmp/test.js || true
+      echo "ESLint image validation successful"
+
+validate-markdownlint-image:
+  tags: $[[ inputs.tags ]]
+  stage: test
+  image: $CI_REGISTRY_IMAGE/${NAME_AND_TAG}
+  needs:
+    - job: 'build-and-push-image: [markdownlint, container_files/markdownlint]'
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      when: manual
+      changes:
+        - container_files/markdownlint/**/*{[^d],[^m]d,[^.]md}
+  script:
+    - echo "Testing image $CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+    - |
+      # Test markdownlint with a sample file
+      echo '# Test Heading' > /tmp/test.md
+      echo '' >> /tmp/test.md
+      echo 'Sample content.' >> /tmp/test.md
+      mdl --ignore-front-matter --style "$MDLINT_CONFIG" /tmp/test.md
+      echo "Markdownlint image validation successful"
+
+validate-markdownlint-cli2-image:
+  tags: $[[ inputs.tags ]]
+  stage: test
+  image: $CI_REGISTRY_IMAGE/${NAME_AND_TAG}
+  needs:
+    - job: 'build-and-push-image: [markdownlint_cli2, container_files/markdownlint_cli2]'
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      when: manual
+      changes:
+        - container_files/markdownlint_cli2/**/*{[^d],[^m]d,[^.]md}
+  script:
+    - echo "Testing image $CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+    - |
+      # Test markdownlint-cli2 with a sample file
+      echo '# Test Heading' > /tmp/test.md
+      echo '' >> /tmp/test.md
+      echo 'Sample content.' >> /tmp/test.md
+      markdownlint-cli2 /tmp/test.md
+      echo "Markdownlint-cli2 image validation successful"
+
+validate-shellcheck-image:
+  tags: $[[ inputs.tags ]]
+  stage: test
+  image: $CI_REGISTRY_IMAGE/${NAME_AND_TAG}
+  needs:
+    - job: 'build-and-push-image: [shellcheck, container_files/shellcheck]'
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      when: manual
+      changes:
+        - container_files/shellcheck/**/*{[^d],[^m]d,[^.]md}
+  script:
+    - echo "Testing image $CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+    - |
+      # Test shellcheck with a sample script
+      echo '#!/bin/bash' > /tmp/test.sh
+      echo 'echo "Hello, World!"' >> /tmp/test.sh
+      shellcheck /tmp/test.sh
+      echo "Shellcheck image validation successful"
+
+validate-pytest-image:
+  tags: $[[ inputs.tags ]]
+  stage: test
+  image: $CI_REGISTRY_IMAGE/${NAME_AND_TAG}
+  needs:
+    - job: 'build-and-push-image: [pytest, container_files/pytest]'
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      when: manual
+      changes:
+        - container_files/pytest/**/*{[^d],[^m]d,[^.]md}
+  script:
+    - echo "Testing image $CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+    - |
+      # Test pytest by creating a sample test and collecting it
+      pytest --version
+      mkdir -p /tmp/test_dir
+      echo 'def test_sample():' > /tmp/test_dir/test_sample.py
+      echo '    assert 1 + 1 == 2' >> /tmp/test_dir/test_sample.py
+      pytest --collect-only /tmp/test_dir/
+      echo "Pytest image validation successful"
+
+validate-podman-image:
+  tags: $[[ inputs.tags ]]
+  stage: test
+  image: $CI_REGISTRY_IMAGE/${NAME_AND_TAG}
+  needs:
+    - job: 'build-and-push-image: [podman, container_files/podman]'
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      when: manual
+      changes:
+        - container_files/podman/**/*{[^d],[^m]d,[^.]md}
+  script:
+    - echo "Testing image $CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+    - |
+      # Test podman by checking its capabilities
+      podman --version
+      podman info --format json | head -20
+
+validate-adaptio-ci-image:
+  tags:
+    - adaptio-k8-2
+  stage: test
+  image: $CI_REGISTRY_IMAGE/${NAME_AND_TAG}
+  needs:
+    - job: 'build-and-push-image: [adaptio-ci, container_files/adaptio_ci, linux/amd64,linux/arm64]'
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      when: manual
+      changes:
+        - container_files/adaptio_ci/**/*{[^d],[^m]d,[^.]md}
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - POST_BUILD_HOOK=false
+    - section_start nix_cache_preparations "K8 based nix cache preparations in nix.conf" true
+    - |
+      cat >> /etc/nix/nix.conf << EOF
+      extra-substituters = $NIX_CACHE_URL
+      extra-trusted-public-keys = $NIX_CACHE_PUB_KEY
+      secret-key-files = $NIX_CACHE_SIGNING_KEY_FILE
+      EOF
+
+      if [[ "$POST_BUILD_HOOK" == "true" ]]; then
+        echo "post-build-hook = $NIX_CACHE_BUILD_HOOK_FILE" >> /etc/nix/nix.conf
+        chmod +x $NIX_CACHE_BUILD_HOOK_FILE
+      fi
+    - section_end nix_cache_preparations
+  script:
+    - echo "Testing image $CI_REGISTRY_IMAGE/${NAME_AND_TAG}"
+    - |
+      # Test adaptio-ci by verifying Nix and essential tools
+      nix --version
+      git --version
+      jq --version
+    - section_start flake_check "Check-Nix; evaluate flake, build and run tests" true
+    - nix flake check
+    - section_end flake_check
+    - echo "Adaptio-CI image validation successful"

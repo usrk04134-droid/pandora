@@ -1,0 +1,223 @@
+workflow:
+  name: '$PIPELINE_NAME'
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      variables:
+        PIPELINE_NAME: 'MR pipeline: $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME'
+
+default:
+  interruptible: false
+
+.hil-os-job-rules: &hil-os-job-rules
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    interruptible: true
+    changes:
+      # Exclude .md files (ruby fnmatch glob)
+      - hil-os/**/*{[^d],[^m]d,[^.]md}
+
+.hil-os-job-rules-iso: &hil-os-job-rules-iso
+  - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
+    changes:
+      # Exclude .md files (ruby fnmatch glob)
+      - hil-os/**/*{[^d],[^m]d,[^.]md}
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    interruptible: true
+    changes:
+      # Exclude .md files (ruby fnmatch glob)
+      - hil-os/**/*{[^d],[^m]d,[^.]md}
+
+include:
+  - local: /.gitlab-ci/lint-commit.yml
+
+  - local: /.gitlab-ci/lint-markdown-cli2.yml
+    inputs:
+      exclude-paths:
+        - test/testzilla/plc/*
+
+  - local: /.gitlab-ci/lint-nix.yml
+
+  - local: /.gitlab-ci/lint-shellscript.yml
+  - local: /.gitlab-ci/lint-python.yml
+  - local: /.gitlab-ci/variables.yml
+
+  - local: /.gitlab-ci/build-and-push-image.yml
+    inputs:
+      job-matrix:
+        - IMG_NAME: adaptio-ci
+          IMG_FILES: container_files/adaptio_ci
+          PLATFORM: linux/amd64,linux/arm64
+        - IMG_NAME: podman
+          IMG_FILES: container_files/podman
+        - IMG_NAME: manifest_validator
+          IMG_FILES: container_files/manifest_validator
+        - IMG_NAME: markdownlint
+          IMG_FILES: container_files/markdownlint
+        - IMG_NAME: markdownlint_cli2
+          IMG_FILES: container_files/markdownlint_cli2
+        - IMG_NAME: gitlint
+          IMG_FILES: container_files/gitlint
+        - IMG_NAME: shellcheck
+          IMG_FILES: container_files/shellcheck
+        - IMG_NAME: tagger
+          IMG_FILES: container_files/tagger
+        - IMG_NAME: ruff
+          IMG_FILES: container_files/ruff
+        - IMG_NAME: pytest
+          IMG_FILES: container_files/pytest
+        - IMG_NAME: eslint
+          IMG_FILES: container_files/eslint
+
+  - local: /.gitlab-ci/pre-production-tests.yml
+
+  - local: /.gitlab-ci/trigger-stage-pipeline.yml
+
+  - local: /.gitlab-ci/testzilla-unit-test.yml
+    inputs:
+      job-rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_REF_PROTECTED == "true"'
+          changes:
+            - 'test/testzilla/**/*.py'
+            - 'test/unit_tests/**/*.py'
+            - '.gitlab-ci/testzilla-unit-test.yml'
+
+  - local: /.gitlab-ci/build-and-push-flake.yml
+    inputs:
+      job-rules:
+        - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
+          changes:
+            # Exclude .md files (ruby fnmatch glob)
+            - $IMG_FILES/**/*{[^d],[^m]d,[^.]md}
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+          changes:
+            # Exclude .md files (ruby fnmatch glob)
+            - $IMG_FILES/**/*{[^d],[^m]d,[^.]md}
+      job-matrix:
+        - IMG_NAME: nix-stored
+          IMG_FILES: container_files/nix-stored
+        - IMG_NAME: test-env
+          IMG_FILES: container_files/test-env
+
+  - local: /.gitlab-ci/build-nix.yml
+    inputs:
+      job-name: 'build-hil-gbg-01'
+      job-rules: *hil-os-job-rules
+      job-timeout: 90 minutes
+      nix-attribute: './hil-os#packages.x86_64-linux.hil-gbg-01'
+      verbose: true
+
+  - local: /.gitlab-ci/build-nix.yml
+    inputs:
+      job-name: 'build-hil-gbg-02'
+      job-rules: *hil-os-job-rules
+      job-timeout: 90 minutes
+      nix-attribute: './hil-os#packages.x86_64-linux.hil-gbg-02'
+      verbose: true
+
+  - local: /.gitlab-ci/build-nix.yml
+    inputs:
+      job-name: 'build-hil-chn-01'
+      job-rules: *hil-os-job-rules
+      job-timeout: 90 minutes
+      nix-attribute: './hil-os#packages.x86_64-linux.hil-chn-01'
+      verbose: true
+
+  - local: /.gitlab-ci/build-nix.yml
+    inputs:
+      job-name: 'build-hil-gbg-01-iso'
+      job-rules: *hil-os-job-rules-iso
+      job-artifacts-paths: []
+      publish-artifact-name: 'hil-gbg-01-installer'
+      publish-artifact-path: 'result/iso/hil-gbg-01-installer.iso'
+      nix-attribute: './hil-os#packages.x86_64-linux.hil-gbg-01-installer'
+      verbose: true
+      post-build-hook: 'false'
+
+  - local: /.gitlab-ci/build-nix.yml
+    inputs:
+      job-name: 'build-hil-gbg-02-iso'
+      job-rules: *hil-os-job-rules-iso
+      job-artifacts-paths: []
+      publish-artifact-name: 'hil-gbg-02-installer'
+      publish-artifact-path: 'result/iso/hil-gbg-02-installer.iso'
+      nix-attribute: './hil-os#packages.x86_64-linux.hil-gbg-02-installer'
+      verbose: true
+      post-build-hook: 'false'
+
+  - local: /.gitlab-ci/build-nix.yml
+    inputs:
+      job-name: 'build-hil-chn-01-iso'
+      job-rules: *hil-os-job-rules-iso
+      job-artifacts-paths: []
+      publish-artifact-name: 'hil-chn-01-installer'
+      publish-artifact-path: 'result/iso/hil-chn-01-installer.iso'
+      nix-attribute: './hil-os#packages.x86_64-linux.hil-chn-01-installer'
+      verbose: true
+      post-build-hook: 'false'
+
+  - local: /.gitlab-ci/publish-python.yaml
+    inputs:
+      job-name: 'build-and-publish-laserbeak'
+      job-stage: 'build'
+      job-rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+          changes:
+            - 'container_files/laserbeak/pyproject.toml'
+            - 'container_files/laserbeak/src/*'
+        - if: '$CI_COMMIT_REF_PROTECTED == "true"'
+          changes:
+            - 'container_files/laserbeak/pyproject.toml'
+            - 'container_files/laserbeak/src/*'
+      package-path: 'container_files/laserbeak'
+
+  - local: /.gitlab-ci/update-image-tags.yml
+    inputs:
+      job-matrix:
+        - IMG_NAME: adaptio-ci
+          IMG_FILES: container_files/adaptio_ci
+          PLATFORM: linux/amd64,linux/arm64
+        - IMG_NAME: podman
+          IMG_FILES: container_files/podman
+        - IMG_NAME: manifest_validator
+          IMG_FILES: container_files/manifest_validator
+        - IMG_NAME: markdownlint
+          IMG_FILES: container_files/markdownlint
+        - IMG_NAME: markdownlint_cli2
+          IMG_FILES: container_files/markdownlint_cli2
+        - IMG_NAME: gitlint
+          IMG_FILES: container_files/gitlint
+        - IMG_NAME: shellcheck
+          IMG_FILES: container_files/shellcheck
+        - IMG_NAME: tagger
+          IMG_FILES: container_files/tagger
+          ENABLE_SECRET_ARGS: 'true'
+        - IMG_NAME: ruff
+          IMG_FILES: container_files/ruff
+        - IMG_NAME: pytest
+          IMG_FILES: container_files/pytest
+        - IMG_NAME: eslint
+          IMG_FILES: container_files/eslint
+
+  # Disabled, as GitLab shared runner does not have access to our nix cache
+  # thus requires a arm64 runner deployed in our infrastructure.
+  #- local: /.gitlab-ci/build-nix.yml
+  #  inputs:
+  #    tags:
+  #      - saas-linux-medium-arm64
+  #    job-name: "build-hilos-rpi5-iso"
+  #    job-artifacts-paths: []
+  #    publish-artifact-name: "hil-os-aarch64-rpi5"
+  #    publish-artifact-path: "result/sd-image/nixos-sd-image-*-aarch64-linux.img.zst"
+  #    nix-attribute: "./hil-os#packages.aarch64-linux.default"
+  #    verbose: true
+
+stages:
+  - lint
+  - build
+  - test
+  - deploy
+  - downstream

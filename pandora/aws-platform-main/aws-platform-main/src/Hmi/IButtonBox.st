@@ -1,0 +1,8 @@
+NAMESPACE Esab.Hmi
+
+    INTERFACE IButtonBox
+        METHOD Execute
+        END_METHOD
+    END_INTERFACE
+
+END_NAMESPACE

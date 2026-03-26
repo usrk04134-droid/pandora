@@ -1,0 +1,73 @@
+# Template job for updating the test manifest
+#
+# In addition to the inputs, this job requires the following variables to be available in the pipeline:
+# - SERVICE_ACCOUNT_PAT: The personal access token of the service account
+# - SERVICE_ACCOUNT_USER_NAME: The username of the service account
+# - SERVICE_ACCOUNT_EMAIL: The email of the service account
+
+spec:
+  inputs:
+    job-stage:
+      description: 'The stage the job will run in'
+      type: string
+      default: 'configuration'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CI_COMMIT_REF_PROTECTED == "true"'
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          when: never
+    system-manifest-version:
+      description: 'The version of the system manifest we are testing'
+      type: string
+      default: ''
+    test-manifest-path:
+      description: 'The path to the test manifest file that shall be updated'
+      type: string
+      default: 'test-manifest.yaml'
+    issue-id:
+      description: 'The issue ID to link the merge request to'
+      type: string
+      default: 'ADT-2527'
+---
+include:
+  - local: '/.gitlab-ci/variables.yml'
+  - local: '/.gitlab-ci/common.yml'
+  - local: '/.gitlab-ci/fetch-scripts.yml'
+
+.update-test-manifest: &update-test-manifest
+  - section_start update_test_manifest "Update test manifest YAML" true
+  - |
+    [[ -z "$[[ inputs.system-manifest-version ]]" ]] && log_info "No system manifest version provided. Skip manifest update!" && exit 250
+
+    log_info "Updating test manifest with system manifest version: $[[ inputs.system-manifest-version]]"
+
+    yq -i ".system_manifest.source.version = \"$[[ inputs.system-manifest-version]]\"" "$[[ inputs.test-manifest-path ]]"
+
+    log_debug "Updated test manifest:\n$(cat $[[ inputs.test-manifest-path ]])"
+
+  - section_end update_test_manifest
+
+update-test-manifest:
+  stage: $[[ inputs.job-stage ]]
+  rules: $[[ inputs.job-rules ]]
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.0
+  tags: [smalls]
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - !reference [.git-setup, script]
+    - !reference [.fetch-scripts, script]
+  script:
+    - *update-test-manifest
+    - >
+      $SCRIPTS_DIR/create-and-merge-request.sh
+      --project-id ${CI_PROJECT_ID}
+      --token $SERVICE_ACCOUNT_PAT
+      --branch $CI_COMMIT_BRANCH
+      --all-tracked
+      --mr-title "chore: Update test manifest"
+      --mr-branch-prefix "update-test-manifest"
+      --jira-id "$[[ inputs.issue-id ]]"
+  allow_failure:
+    exit_codes: [250]

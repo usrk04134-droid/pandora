@@ -6,24 +6,34 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
     flake-utils.lib.eachSystem [ "aarch64-darwin" "aarch64-linux" "x86_64-darwin" "x86_64-linux" ] (
       system:
       let
         pkgs = import nixpkgs { inherit system; };
         isLinux = pkgs.stdenv.hostPlatform.isLinux;
-          commonPackages = with pkgs; [
+        commonPackages =
+          with pkgs;
+          [
             bash
             coreutils
             gnugrep
             openssh
             rsync
             sshpass
-          ] ++ lib.optional isLinux pkgs.iputils
-            ++ lib.optional isLinux pkgs.iproute2;
+          ]
+          ++ lib.optional isLinux pkgs.iputils
+          ++ lib.optional isLinux pkgs.iproute2;
 
         # TODO: ADT-1829 Use SOPS configuration to download Python packages
-        pyproject_laserbeak = builtins.fromTOML (builtins.readFile ../../container_files/laserbeak/pyproject.toml);
+        pyproject_laserbeak = builtins.fromTOML (
+          builtins.readFile ../../container_files/laserbeak/pyproject.toml
+        );
 
         laserbeak = pkgs.python312Packages.buildPythonPackage rec {
           pname = pyproject_laserbeak.project.name;
@@ -33,8 +43,9 @@
           src = ../../container_files/laserbeak;
 
           nativeBuildInputs = with pkgs.python312Packages; [ flit-core ];
-          propagatedBuildInputs = with pkgs.python312Packages;
-            map (pkg: pkgs.python312Packages.${pkg}) (pyproject_laserbeak.project.dependencies or []);
+          propagatedBuildInputs =
+            with pkgs.python312Packages;
+            map (pkg: pkgs.python312Packages.${pkg}) (pyproject_laserbeak.project.dependencies or [ ]);
 
           meta = {
             description = pyproject_laserbeak.project.description;
@@ -42,7 +53,9 @@
           };
         };
 
-        pyproject_snitch = builtins.fromTOML (builtins.readFile ../../container_files/snitch/pyproject.toml);
+        pyproject_snitch = builtins.fromTOML (
+          builtins.readFile ../../container_files/snitch/pyproject.toml
+        );
         snitch = pkgs.python312Packages.buildPythonPackage rec {
           pname = pyproject_snitch.project.name;
           version = pyproject_snitch.project.version or "255.255.255";
@@ -52,20 +65,20 @@
 
           nativeBuildInputs = with pkgs.python312Packages; [ flit-core ];
           propagatedBuildInputs =
-          let
-            stdDeps = with pkgs.python312Packages;
-              map (pkg: pkgs.python312Packages.${pkg}) (
-                builtins.filter (dep: dep != "laserbeak") (pyproject_snitch.project.dependencies or [])
-              );
-          in stdDeps ++ [ laserbeak ];
-
+            let
+              stdDeps =
+                with pkgs.python312Packages;
+                map (pkg: pkgs.python312Packages.${pkg}) (
+                  builtins.filter (dep: dep != "laserbeak") (pyproject_snitch.project.dependencies or [ ])
+                );
+            in
+            stdDeps ++ [ laserbeak ];
 
           meta = {
             description = pyproject_snitch.project.description;
             authors = pyproject_snitch.project.authors;
           };
         };
-
 
         # Docs: https://github.com/NixOS/nixpkgs/blob/master/doc/languages-frameworks/python.section.md#building-packages-and-applications-building-packages-and-applications
         pyproject_testzilla = builtins.fromTOML (builtins.readFile ../../test/pyproject.toml);
@@ -77,9 +90,13 @@
 
           src = ../../test;
 
-          nativeBuildInputs = with pkgs.python312Packages; [ setuptools wheel ];
-          propagatedBuildInputs = with pkgs.python312Packages;
-            map (pkg: pkgs.python312Packages.${pkg}) (pyproject_testzilla.project.dependencies or []);
+          nativeBuildInputs = with pkgs.python312Packages; [
+            setuptools
+            wheel
+          ];
+          propagatedBuildInputs =
+            with pkgs.python312Packages;
+            map (pkg: pkgs.python312Packages.${pkg}) (pyproject_testzilla.project.dependencies or [ ]);
 
           meta = {
             description = pyproject_testzilla.project.description;
@@ -96,7 +113,6 @@
           ps.pytest-random-order
         ]);
 
-
         extraLibs = with pkgs; [
           glibcLocales
           dejavu_fonts
@@ -109,36 +125,40 @@
           unifont
         ];
 
-        guiLibs = with pkgs; [
-          glib
-          xorg.libX11
-          xorg.libXcomposite
-          xorg.libXdamage
-          xorg.libXrandr
-          xorg.libXext
-          xorg.libXrender
-          xorg.libXi
-          xorg.libXfixes
-          xorg.libXcursor
-          xorg.libxcb
-          libxkbcommon
-          mesa
-          pango
-          harfbuzz
-          cairo
-          freetype
-          fontconfig
-          gtk3
-          gdk-pixbuf
-          atk
-          alsa-lib
-          dbus
-          stdenv.cc.cc.lib
-        ] ++ (with pkgs.gst_all_1; [
-          gstreamer
-          gst-plugins-base
-          gst-plugins-good
-        ]) ++ extraLibs;
+        guiLibs =
+          with pkgs;
+          [
+            glib
+            xorg.libX11
+            xorg.libXcomposite
+            xorg.libXdamage
+            xorg.libXrandr
+            xorg.libXext
+            xorg.libXrender
+            xorg.libXi
+            xorg.libXfixes
+            xorg.libXcursor
+            xorg.libxcb
+            libxkbcommon
+            mesa
+            pango
+            harfbuzz
+            cairo
+            freetype
+            fontconfig
+            gtk3
+            gdk-pixbuf
+            atk
+            alsa-lib
+            dbus
+            stdenv.cc.cc.lib
+          ]
+          ++ (with pkgs.gst_all_1; [
+            gstreamer
+            gst-plugins-base
+            gst-plugins-good
+          ])
+          ++ extraLibs;
 
         # Dev shell
         shell = pkgs.mkShell {
@@ -146,7 +166,9 @@
             pythonEnv
             pkgs.playwright-driver
             pkgs.playwright-driver.browsers
-          ] ++ commonPackages ++ guiLibs;
+          ]
+          ++ commonPackages
+          ++ guiLibs;
           shellHook = ''
             export PATH=${pythonEnv}/bin:$PATH
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -168,7 +190,7 @@
         # Build ContainerImage
         containerImage = pkgs.dockerTools.buildImage {
           name = "test-env";
-          tag = "1.3.5";
+          tag = "1.3.7";
           fromImageName = "nixos/nix";
           fromImageTag = "2.33.2";
           copyToRoot = pkgs.buildEnv {
@@ -177,8 +199,14 @@
               pythonEnv
               pkgs.playwright-driver
               pkgs.playwright-driver.browsers
-            ] ++ commonPackages ++ guiLibs;
-            pathsToLink = [ "/bin" "/lib" "/share" ];
+            ]
+            ++ commonPackages
+            ++ guiLibs;
+            pathsToLink = [
+              "/bin"
+              "/lib"
+              "/share"
+            ];
           };
           config = {
             Cmd = [ "/bin/bash" ];
@@ -203,7 +231,8 @@
           '';
         };
 
-      in {
+      in
+      {
         devShells.test-environment = shell;
         devShells.default = shell;
         packages.containerImage = containerImage;

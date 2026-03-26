@@ -1,0 +1,40 @@
+# This job will always trigger on a change to any .sh file in the project.
+#
+# If needed, directories can be excluded from the linter by setting the exclude_paths
+# variable to a space separated list of directory paths.
+
+spec:
+  inputs:
+    exclude_paths:
+      description: 'Space separated list of directories to exclude from the search'
+      type: string
+      default: ''
+
+---
+shellcheck:
+  tags:
+    - smalls
+  stage: lint
+  image: registry.gitlab.com/esab/abw/infra-and-test/shellcheck:0.1.0
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      interruptible: true
+      changes:
+        - '**/*.sh'
+  script:
+    - |
+      exclude_paths="$[[ inputs.exclude_paths ]]"
+
+      # Base command
+      find_cmd="find . -type f -iname '*.sh'"
+
+      # Loop over each path in exclude paths to add exclusions to the command
+      for path in $exclude_paths; do
+          find_cmd="$find_cmd ! -path './$path/*'"
+      done
+
+      # Finalize the command
+      find_cmd="$find_cmd -exec shellcheck -x --source-path=SCRIPTDIR --color=always {} +"
+
+      # Execute
+      eval "$find_cmd"

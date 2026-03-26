@@ -1,0 +1,102 @@
+# Template job for updating a flake input
+#
+# In addition to the inputs, this job requires the following variables to be available in the pipeline:
+# - SERVICE_ACCOUNT_PAT: The personal access token of the service account
+# - SERVICE_ACCOUNT_USER_NAME: The username of the service account
+# - SERVICE_ACCOUNT_EMAIL: The email of the service account
+# - COMMIT_TYPE: The type of commit to create an MR for, e.g., fix, feat, chore, etc.
+# - INPUT_NAME: The name of the input to update
+# - INPUT_REV: The new revision of the input to update to
+# - INPUT_REF: The revision ref, either branch or tag. E.g., main, 0.1.0, etc.
+
+spec:
+  inputs:
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '1 hour'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CI_COMMIT_REF_PROTECTED == "true"'
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          when: never
+    ignore-breaking-change:
+      description: 'Remove "!" from the commit type if it exists'
+      type: boolean
+      default: false
+    issue-id:
+      description: 'The issue ID to link the merge request to'
+      type: string
+      default: 'ADT-2527'
+
+---
+include:
+  - local: '/.gitlab-ci/variables.yml'
+  - local: '/.gitlab-ci/common.yml'
+  - local: '/.gitlab-ci/fetch-scripts.yml'
+
+.update-nix-input-revisions: &update-nix-input-revisions
+  - source $GITLAB_SHARED_FUNCS
+  - section_start update_nix_input_revisions "Update flake input revisions" true
+  - |
+    set -euo pipefail
+
+    [[ -z "${INPUT_NAME}" ]]  && log_error "Missing 'input-name'" && exit 1
+    [[ -z "${INPUT_REV}" ]]  && log_error "Missing 'input-rev'" && exit 1
+    [[ -z "${INPUT_REF}" ]]  && log_error "Missing 'input-ref'" && exit 1
+
+    # Update the 'rev' field in flake.nix
+    log_info "Update the 'rev' for '${INPUT_NAME}' with '${INPUT_REV}'"
+
+    sed -i "/${INPUT_NAME}[[:space:]]*=/,/}/s|rev = \".*\"|rev = \"${INPUT_REV}\"|" flake.nix || {
+      log_error "Failed to update the revision for ${INPUT_NAME} in flake.nix!"
+      exit 1
+    }
+
+    # Update the 'ref' field in flake.nix (handles both commented and uncommented ref)
+    log_info "Update the 'ref' for '${INPUT_NAME}' with '${INPUT_REF}'"
+
+    sed -i "/${INPUT_NAME}[[:space:]]*=/,/}/s|\([[:space:]]*\)\(#\{0,1\}[[:space:]]*\)ref = \".*\"|\1\2ref = \"${INPUT_REF}\"|" flake.nix || {
+      log_error "Failed to update the ref for ${INPUT_NAME} in flake.nix!"
+      exit 1
+    }
+
+    nix flake lock || {
+      log_error "Failed to update flake.lock!"
+      exit 1
+    }
+  - section_end update_nix_input_revisions
+
+update-and-merge-flake:
+  timeout: $[[ inputs.job-timeout ]]
+  rules: $[[ inputs.job-rules ]]
+  image: registry.gitlab.com/esab/abw/infra-and-test/adaptio-ci:1.0.7
+  tags: [adaptio-k8-2]
+  stage: .pre
+  before_script:
+    - !reference [.git-setup, script]
+    - !reference [.fetch-scripts, script]
+  script:
+    - *update-nix-input-revisions
+    - |
+      # Check if the last character in the commit type is "!"
+      if [[ "${COMMIT_TYPE: -1}" == "!" && $[[ inputs.ignore-breaking-change ]] ]]; then
+        log_debug "Modify commit type to ignore breaking change!"
+        COMMIT_TYPE="${COMMIT_TYPE%?}"  # Remove the last character
+      fi
+
+      # Build the merge request title. Truncate the input name to 16 characters
+      # to display as much relevant information as possible within the 50 character limit.
+      temp_title="${COMMIT_TYPE}: Bump ${INPUT_NAME:0:16} to ${INPUT_REF}"
+      MR_TITLE="${temp_title:0:50}"
+    - >
+      $SCRIPTS_DIR/create-and-merge-request.sh
+      --project-id ${CI_PROJECT_ID}
+      --token $SERVICE_ACCOUNT_PAT
+      --branch $CI_COMMIT_BRANCH
+      --path-filter "flake.*"
+      --mr-title "${MR_TITLE}"
+      --mr-branch-prefix "update-${INPUT_NAME}-${INPUT_REV:0:7}"
+      --jira-id "$[[ inputs.issue-id ]]"

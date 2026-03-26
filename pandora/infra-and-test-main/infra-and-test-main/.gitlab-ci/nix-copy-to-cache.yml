@@ -1,0 +1,59 @@
+# Template job for copying a flake to the nix cache.
+
+spec:
+  inputs:
+    tags:
+      description: 'The runner selection tags'
+      type: array
+      default:
+        - adaptio-k8-2
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'nix-copy-to-cache'
+    job-stage:
+      description: 'The stage the job will run in'
+      type: string
+      default: '.post'
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '10 minutes'
+    job-rules:
+      description: 'The list of rules: for the job'
+      type: array
+      default:
+        - if: '$CI_COMMIT_REF_PROTECTED == "true"'
+    other-commit:
+      description: 'If the job should push a specific commit to the cache, specify the commit hash here'
+      type: string
+      default: ''
+    verbose:
+      description: 'If set verbose build output enabled'
+      type: boolean
+      default: false
+
+---
+include:
+  - local: '/.gitlab-ci/k8-runner-defaults.yml'
+    inputs:
+      post-build-hook: false
+      job-name-suffix: $[[ inputs.job-name ]]
+
+'$[[ inputs.job-name ]]':
+  extends: '.k8-adaptio-$[[ inputs.job-name ]]'
+  stage: $[[ inputs.job-stage ]]
+  tags: $[[ inputs.tags ]]
+  rules: $[[ inputs.job-rules ]]
+  script:
+    - VERBOSE=""
+    - if $[[ inputs.verbose ]]; then VERBOSE="-vvvvv"; fi
+    - |
+      if [[ -n "$[[ inputs.other-commit ]]" ]]; then
+         log_info "Checking out other commit: $[[ inputs.other-commit ]]"
+         git fetch origin $[[ inputs.other-commit ]]
+         git checkout $[[ inputs.other-commit ]]
+      fi
+    - nix flake archive . --json > flake-archive.json
+    - store_path=$(jq -r '.path' flake-archive.json)
+    - nix copy --to "$NIX_CACHE_URL" "$store_path" $VERBOSE

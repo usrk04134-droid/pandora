@@ -16,7 +16,7 @@ from tagger.git_helper import (
 from tagger.gitlab_helper import get_merge_request_commits
 
 TYPE_MINOR = {"feat"}
-TYPE_PATCH = {"fix", "perf"}
+TYPE_PATCH = {"fix", "perf", "revert"}
 
 
 class Bump(Enum):
@@ -246,12 +246,21 @@ def get_type_and_severity(summary: str, trailers: dict[str, list[str]]) -> tuple
     regex = re.compile(re_summary, flags=re.VERBOSE)
     change_type = ""
 
-    match = regex.match(summary.strip())
+    normalized_summary = summary.strip()
+
+    # GitLab-generated revert commit messages are often in the form:
+    # Revert "<original summary>"
+    # Classify these as type "revert" so they trigger a PATCH bump.
+    if re.match(r"^revert(?:\s|$)", normalized_summary, re.IGNORECASE):
+        change_type = "revert"
+
+    match = regex.match(normalized_summary)
 
     # Check if the commit "title" has the indicator(!) for breaking change
     logger.debug(f"Check commit summary: {summary}")
     if match:
-        change_type = match.group("type")
+        if not change_type:
+            change_type = match.group("type")
         breaking = match.group("breaking")
 
         if breaking:

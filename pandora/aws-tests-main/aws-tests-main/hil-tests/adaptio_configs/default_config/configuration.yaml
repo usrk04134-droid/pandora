@@ -1,0 +1,5 @@
+image_provider:
+  type: simulation
+  simulation:
+    realtime: false
+    images: .

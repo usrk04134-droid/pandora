@@ -1,0 +1,165 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Test Manifest Schema",
+  "description": "Schema for test manifest YAML configuration",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "TestManifest",
+      "description": "Type of manifest file"
+    },
+    "test_environment": {
+      "type": "object",
+      "description": "Configuration for the test environment",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "container_registry"
+          ],
+          "description": "Type of test environment"
+        },
+        "registry_path": {
+          "type": "string",
+          "format": "uri-reference",
+          "description": "Path to the container registry"
+        },
+        "version": {
+          "type": "string",
+          "description": "Version of the test environment"
+        }
+      },
+      "required": [
+        "type",
+        "registry_path",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "tests": {
+      "type": "object",
+      "description": "Test configurations",
+      "properties": {
+        "source": {
+          "type": "object",
+          "description": "Source configuration for test cases",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "git"
+              ],
+              "description": "Type of source control"
+            },
+            "repository": {
+              "type": "string",
+              "format": "uri-reference",
+              "description": "Path to the repository"
+            },
+            "branch": {
+              "type": "string",
+              "description": "Git branch name"
+            },
+            "commit": {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{7,40}$",
+              "description": "Git commit hash"
+            }
+          },
+          "required": [
+            "type",
+            "repository",
+            "branch",
+            "commit"
+          ],
+          "additionalProperties": false
+        },
+        "paths": {
+          "type": "array",
+          "description": "Paths inside repository to test cases directories",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "source",
+        "paths"
+      ],
+      "additionalProperties": false
+    },
+    "system_manifest": {
+      "type": "object",
+      "description": "Configuration for system manifest",
+      "properties": {
+        "source": {
+          "type": "object",
+          "description": "Source configuration for system manifest",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "git"
+              ],
+              "description": "Type of source control"
+            },
+            "repository": {
+              "type": "string",
+              "format": "uri-reference",
+              "description": "Path to the repository"
+            },
+            "branch": {
+              "type": "string",
+              "description": "Git branch name"
+            },
+            "version": {
+              "type": "string",
+              "description": "Version of the system manifest"
+            }
+          },
+          "required": [
+            "type",
+            "repository",
+            "branch",
+            "version"
+          ],
+          "additionalProperties": false
+        },
+        "path": {
+          "type": "string",
+          "description": "Path inside repository to system manifest file"
+        }
+      },
+      "required": [
+        "source",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional metadata for the test manifest",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Description of the test manifest"
+        }
+      },
+      "required": [
+        "description"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "kind",
+    "test_environment",
+    "tests",
+    "system_manifest",
+    "metadata"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,56 @@
+[project]
+name = "snitch"
+version = "1.0.1"
+description = "Upload JUnit reports to Testrail"
+requires-python = ">=3.12"
+dependencies = [
+    "click",
+    "laserbeak",
+    "requests",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.3",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+]
+
+[build-system]
+requires = ["flit_core<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+pythonpath = ["src"]
+addopts = [
+    "-ra",
+    "-q",
+    "--import-mode=importlib",
+    "--strict-markers",
+    "--strict-config",
+    "-v"
+]
+testpaths = [
+    "tests"
+]
+python_files = [
+    "test_*.py",
+    "*_test.py"
+]
+python_functions = [
+    "test_*"
+]
+python_classes = [
+    "Test*"
+]
+markers = [
+    "integration: Integration tests that require external services",
+    "unit: Unit tests",
+    "slow: Tests that take a long time to run",
+]
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+]

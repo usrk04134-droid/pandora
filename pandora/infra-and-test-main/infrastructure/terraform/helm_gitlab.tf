@@ -67,8 +67,8 @@ resource "helm_release" "gitlab_runner_2" {
               poll_timeout = 360
               cpu_limit = "12"
               memory_limit = "24Gi"
-              cpu_request = "6"
-              memory_request = "12Gi"
+              cpu_request = "4"
+              memory_request = "18Gi"
               [runners.kubernetes.node_selector]
                 role = "worker"
                 environment = "gitlab"
@@ -166,7 +166,7 @@ resource "helm_release" "gitlab_runner_2_smalls" {
               cpu_limit = "4"
               memory_limit = "8Gi"
               cpu_request = "2"
-              memory_request = "4"
+              memory_request = "8Gi"
               [runners.kubernetes.node_selector]
                 role = "worker"
                 environment = "gitlab"

@@ -63,12 +63,15 @@ include:
           IMG_FILES: container_files/shellcheck
         - IMG_NAME: tagger
           IMG_FILES: container_files/tagger
+          ENABLE_SECRET_ARGS: 'true'
         - IMG_NAME: ruff
           IMG_FILES: container_files/ruff
         - IMG_NAME: pytest
           IMG_FILES: container_files/pytest
         - IMG_NAME: eslint
           IMG_FILES: container_files/eslint
+        - IMG_NAME: gl-metrics
+          IMG_FILES: container_files/gl_metrics
 
   - local: /.gitlab-ci/pre-production-tests.yml
 
@@ -201,6 +204,8 @@ include:
           IMG_FILES: container_files/pytest
         - IMG_NAME: eslint
           IMG_FILES: container_files/eslint
+        - IMG_NAME: gl-metrics
+          IMG_FILES: container_files/gl_metrics
 
   # Disabled, as GitLab shared runner does not have access to our nix cache
   # thus requires a arm64 runner deployed in our infrastructure.

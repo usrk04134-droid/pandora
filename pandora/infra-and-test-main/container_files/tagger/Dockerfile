@@ -1,16 +1,16 @@
 FROM python:3.13-alpine
 
 # Bump image version for any changes
-LABEL version="1.1.4"
+LABEL version="1.1.6"
 
 COPY . .
 
 RUN apk add --no-cache \
-    git="2.49.0-r0" \
-    curl="8.14.1-r0" \
-    jq="1.8.0-r0" \
-    bash="5.2.37-r0" \
-    wget="1.25.0-r1"
+    git="2.52.0-r0" \
+    curl="8.17.0-r1" \
+    jq="1.8.1-r0" \
+    bash="5.3.3-r1" \
+    wget="1.25.0-r2"
 
 RUN --mount=type=secret,id=gitlab_token \
     --mount=type=secret,id=gitlab_project_id \

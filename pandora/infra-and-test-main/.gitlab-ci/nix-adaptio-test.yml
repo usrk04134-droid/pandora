@@ -37,22 +37,24 @@ spec:
       description: 'If set verbose build output enabled'
       type: boolean
       default: false
-    test-target:
-      description: 'The test target to run after build'
-      type: string
-      default: ''
+    test-targets:
+      description: 'The test targets to run after build'
+      type: array
+      default: []
     test-output:
-      description: 'The test output to use for the job'
-      type: string
-      default: 'test-output.xml'
+      description: 'The test output files, one per test target'
+      type: array
+      default:
+        - 'test-output.xml'
     test-log:
       description: 'The test log file to collect stdout/stderr'
       type: string
       default: 'test.log'
     test-suite:
-      description: 'The test suite name to use for the job'
-      type: string
-      default: 'Unit Test'
+      description: 'The test suite names, one per test target'
+      type: array
+      default:
+        - 'Unit Test'
 
 ---
 include:
@@ -68,8 +70,6 @@ include:
   timeout: $[[ inputs.job-timeout ]]
   dependencies: $[[ inputs.job-dependencies ]]
   rules: $[[ inputs.job-rules ]]
-  variables:
-    TESTRAIL_SECTION_NAME: $[[ inputs.test-suite ]]
   artifacts:
     when: always
     paths:
@@ -79,11 +79,28 @@ include:
       junit: $[[ inputs.test-output ]]
     expire_in: 2 weeks
   script:
+    - T_SCRIPT_START=$(date +%s)
     - !reference [.fetch-scripts, script]
+    - T_FETCH_END=$(date +%s)
     - VERBOSE=""
     - if $[[ inputs.verbose ]]; then VERBOSE="-vv"; fi
 
     - source $GITLAB_SHARED_FUNCS
+    - |
+      eval "$(declare -f section_start | sed '1s/section_start/_orig_section_start/')"
+      eval "$(declare -f section_end   | sed '1s/section_end/_orig_section_end/')"
+      declare -A _T_START _T_DUR _T_LABEL
+      declare -a _T_ORDER
+      section_start() {
+        _T_START[$1]=$(date +%s)
+        _T_LABEL[$1]="${2:-$1}"
+        _T_ORDER+=("$1")
+        _orig_section_start "$@"
+      }
+      section_end() {
+        _T_DUR[$1]=$(( $(date +%s) - ${_T_START[$1]:-$(date +%s)} ))
+        _orig_section_end "$@"
+      }
 
     - section_start fetch_cache "Test-Nix; fetch nix dependencies" true
     # Fetch from cache separately from building, to get individual timing measurements for each
@@ -109,30 +126,79 @@ include:
       --log-format bar-with-logs
       $VERBOSE
     - section_end build
-    - section_start tests "Test-Nix; run" true
+
     - TEST_LOG=${CI_PROJECT_DIR}/$[[ inputs.test-log ]]
     - EXIT_CODE=0
     - set -o pipefail
-    - >
-      ./result/bin/$[[ inputs.test-target ]] \
-        --doctest-no-colors \
-        --doctest-minimal \
-        --doctest-reporters=junit \
-        --doctest-out=${CI_PROJECT_DIR}/$[[ inputs.test-output ]] \
-        2>&1 | tee ${TEST_LOG} || EXIT_CODE=$?;
-    - sed -i -n '/<testsuites>/,/<\/testsuites>/p' ${CI_PROJECT_DIR}/$[[ inputs.test-output ]]
-    - section_end tests
-
-    - section_start export_testrail "Export results to TestRail" true
-    - ls -la $SCRIPTS_DIR/
+    - T_TESTS_START=$(date +%s)
     - |
+      parse_array() { echo "$1" | tr -d '[]"' | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+      readarray -t TEST_TARGETS < <(parse_array '$[[ inputs.test-targets ]]')
+      readarray -t TEST_OUTPUTS < <(parse_array '$[[ inputs.test-output ]]')
+      readarray -t TEST_SUITES  < <(parse_array '$[[ inputs.test-suite ]]')
+      for i in "${!TEST_TARGETS[@]}"; do
+        target="${TEST_TARGETS[$i]}"
+        output="${CI_PROJECT_DIR}/${TEST_OUTPUTS[$i]}"
+        [ -z "${target}" ] && continue
+        section_start "test_${target}" "${TEST_SUITES[$i]}" true
+        ./result/bin/${target} \
+          --doctest-no-colors \
+          --doctest-minimal \
+          --doctest-reporters=junit \
+          --doctest-out=${output} \
+          2>&1 | tee -a ${TEST_LOG} || EXIT_CODE=$?
+        sed -i -n '/<testsuites>/,/<\/testsuites>/p' ${output}
+        sed -i "s|<testsuite name=\"[^\"]*\"|<testsuite name=\"${TEST_SUITES[$i]}\"|g" ${output}
+        section_end "test_${target}"
+      done
+
+    - T_TESTS_END=$(date +%s)
+    - section_start export_testrail "Export results to TestRail" true
+    - |
+      readarray -t TEST_TARGETS < <(parse_array '$[[ inputs.test-targets ]]')
+      readarray -t TEST_OUTPUTS < <(parse_array '$[[ inputs.test-output ]]')
+      readarray -t TEST_SUITES  < <(parse_array '$[[ inputs.test-suite ]]')
       if [ -n "${CI_COMMIT_TAG}" ]; then
         echo "TAG detected - exporting results to TestRail"
-        $SCRIPTS_DIR/export-test-result.sh \
-          --report ${CI_PROJECT_DIR}/$[[ inputs.test-output ]] || echo "TestRail export failed, continuing..."
+        for i in "${!TEST_TARGETS[@]}"; do
+          target="${TEST_TARGETS[$i]}"
+          [ -z "${target}" ] && continue
+          TESTRAIL_SECTION_NAME="${TEST_SUITES[$i]}" \
+            $SCRIPTS_DIR/export-test-result.sh \
+              --report ${CI_PROJECT_DIR}/${TEST_OUTPUTS[$i]} \
+            || echo "TestRail export failed for ${target}, continuing..."
+        done
       else
         echo "Not a tag - skipping TestRail export"
       fi
     - section_end export_testrail
+    - T_SCRIPT_END=$(date +%s)
+
+    - section_start timing_summary "Timing Summary" true
+    - |
+      fmt() { printf "%dm %02ds" $(($1/60)) $(($1%60)); }
+      JOB_START=$(date -d "$CI_JOB_STARTED_AT" +%s 2>/dev/null || echo "$T_SCRIPT_START")
+      T_NOW=$(date +%s)
+      _SKIP="dry_run nix_cache_preparations timing_summary"
+      echo "===== TIMING SUMMARY ====="
+      printf "%-32s %s\n" "Pod startup:"    "$(fmt $(( T_SCRIPT_START - JOB_START )))"
+      printf "%-32s %s\n" "Fetch scripts:"  "$(fmt $(( T_FETCH_END - T_SCRIPT_START )))"
+      _tests_shown=false
+      for id in "${_T_ORDER[@]}"; do
+        [[ " $_SKIP " == *" $id "* ]] && continue
+        if [[ "$id" == test_* ]]; then
+          if [[ "$_tests_shown" == false ]]; then
+            printf "%-32s %s\n" "Tests:" "$(fmt $(( T_TESTS_END - T_TESTS_START )))"
+            _tests_shown=true
+          fi
+          printf "  %-30s %s\n" "${_T_LABEL[$id]}:" "$(fmt ${_T_DUR[$id]:-0})"
+          continue
+        fi
+        printf "%-32s %s\n" "${_T_LABEL[$id]}:" "$(fmt ${_T_DUR[$id]:-0})"
+      done
+      printf "%-32s %s\n" "Script total:"  "$(fmt $(( T_SCRIPT_END - T_SCRIPT_START )))"
+      printf "%-32s %s\n" "Job wall time:" "$(fmt $(( T_NOW - JOB_START )))"
+      echo "================================="
+    - section_end timing_summary
 
     - exit $EXIT_CODE

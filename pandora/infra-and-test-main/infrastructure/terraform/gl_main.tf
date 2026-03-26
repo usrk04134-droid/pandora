@@ -187,6 +187,15 @@ resource "gitlab_group_variable" "gitlab_shared_functions" {
   raw           = true
 }
 
+resource "gitlab_group_variable" "pushgateway_url" {
+  for_each    = (terraform.workspace == local.gitlab_env ? { (terraform.workspace) = "" } : {})
+  description = "Pushgateway URL for the Kubernetes cluster"
+  group       = var.gitlab_group_id
+  key         = "PUSHGATEWAY_URL"
+  value       = "https://pushgateway.k3s.in"
+  raw         = true
+}
+
 resource "gitlab_branch_protection" "default_branches" {
   for_each                     = (terraform.workspace == local.gitlab_env ? local.adaptio_project_map : {})
   project                      = each.key
@@ -204,6 +213,19 @@ resource "gitlab_branch_protection" "release_branches" {
   for_each                     = (terraform.workspace == local.gitlab_env ? local.adaptio_project_map : {})
   project                      = each.key
   branch                       = "release/*"
+  push_access_level            = "no one"
+  merge_access_level           = "developer"
+  unprotect_access_level       = "maintainer"
+  code_owner_approval_required = true
+  allowed_to_push {
+    user_id = local.mechagodzilla_user_id
+  }
+}
+
+resource "gitlab_branch_protection" "gen2_branch" {
+  for_each                     = (terraform.workspace == local.gitlab_env ? local.adaptio_project_map : {})
+  project                      = each.key
+  branch                       = "gen2"
   push_access_level            = "no one"
   merge_access_level           = "developer"
   unprotect_access_level       = "maintainer"
@@ -252,6 +274,13 @@ resource "gitlab_branch" "release_lp4" {
   for_each = (terraform.workspace == local.gitlab_env ? local.adaptio_project_map : {})
   project  = each.key
   name     = "release/lp4.0"
+  ref      = "main"
+}
+
+resource "gitlab_branch" "gen2" {
+  for_each = (terraform.workspace == local.gitlab_env ? local.adaptio_project_map : {})
+  project  = each.key
+  name     = "gen2"
   ref      = "main"
 }
 

@@ -1,0 +1,6 @@
+NAMESPACE Esab.Utils.Power
+
+    INTERFACE IUps
+    END_INTERFACE
+
+END_NAMESPACE

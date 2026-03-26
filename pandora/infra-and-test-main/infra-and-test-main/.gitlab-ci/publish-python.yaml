@@ -1,0 +1,73 @@
+# This job publishes a given Python package using the flit build system to the
+# projects GitLab Package Registry
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'build-and-push-python-package'
+    job-stage:
+      description: 'The stage of the job'
+      type: string
+      default: 'build'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+    package-path:
+      description: 'The path to the package directory (relative to repo root)'
+      type: string
+      default: '.'
+---
+'$[[ inputs.job-name ]]':
+  stage: $[[ inputs.job-stage ]]
+  rules: $[[ inputs.job-rules ]]
+  image: python:3.12
+  tags: [smalls]
+  variables:
+    TWINE_USERNAME: gitlab-ci-token
+    TWINE_PASSWORD: $CI_JOB_TOKEN
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start install_dependencies "Install jq, flit and twine" true
+    - apt-get update && apt-get install -y jq
+    - python -m pip install --upgrade flit twine
+    - section_end install_dependencies
+  script:
+    - cd $[[ inputs.package-path ]]
+    # Check if version of package exists in the registry using API
+    - section_start version_check "Check if package $PACKAGE_NAME with version $VERSION exist in the registry"
+    - VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+    - PACKAGE_NAME=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['name'])")
+    - section_start api_response "Request GitLab API for package details" true
+    - |
+      API_RESPONSE=$(curl --silent --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+      "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages?package_name=$PACKAGE_NAME")
+      log_debug $API_RESPONSE
+    - section_end api_response
+    - |
+      EXISTS=$(echo "$API_RESPONSE" | jq -r '.[] | select(.version == "'"$VERSION"'") | .version')
+      if [[ -n "$EXISTS" ]]; then
+        log_error "❌ Version $VERSION for package $PACKAGE_NAME already exists in the GitLab PyPI registry."
+        exit 1
+      fi
+    - section_end version_check
+    - section_start dynamic_version "Set dynamic version if MR Pipeline"
+    # Rename version in MR pipelines to include the short SHA
+    - |
+      if [[ "$CI_COMMIT_REF_PROTECTED" != "true" ]]; then
+        # Extract current version line from pyproject.toml
+        NEW_VERSION="${VERSION}+${CI_COMMIT_SHORT_SHA}"
+        log_info "Setting dynamic version: ${NEW_VERSION}"
+        # Replace version line in pyproject.toml
+        sed -i -E "s/^version\s*=.*/version = \"${NEW_VERSION}\"/" pyproject.toml
+      fi
+    - section_end dynamic_version
+    - section_start build_and_publish "Build package using flit and pubblish using twine"
+    - flit build
+    - python -m twine upload --repository-url ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi dist/*
+    - section_end build_and_publish
+  artifacts:
+    paths:
+      - $[[ inputs.package-path ]]/dist/*
+    expire_in: 1 week

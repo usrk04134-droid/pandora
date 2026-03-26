@@ -1,0 +1,52 @@
+# This pipeline configuration is specifically for triggered pipelines from infra-and-test
+# It runs a minimal set of validation jobs: check-nix, build-adaptio, and unit-tests
+# This file is conditionally included in adaptio.gitlab-ci.yml when PIPELINE_ENV == "stage"
+
+variables:
+  TEMPLATE_REPO_BRANCH: 'main'
+
+include:
+  - project: 'esab/abw/infra-and-test'
+    ref: $TEMPLATE_REPO_BRANCH
+    file: '/.gitlab-ci/check-nix.yml'
+    inputs:
+      job-name: 'check-nix:stage'
+      job-rules:
+        - when: on_success
+
+  - project: 'esab/abw/infra-and-test'
+    ref: $TEMPLATE_REPO_BRANCH
+    file: '.gitlab-ci/build-nix.yml'
+    inputs:
+      job-name: 'build-adaptio:stage'
+      nix-attribute: '.#adaptio'
+      job-rules:
+        - when: on_success
+
+  - project: 'esab/abw/infra-and-test'
+    ref: $TEMPLATE_REPO_BRANCH
+    file: '.gitlab-ci/nix-adaptio-test.yml'
+    inputs:
+      job-name: 'unit-tests:stage'
+      nix-attribute: '.#adaptio-tests'
+      test-target: 'adaptio-unit-tests'
+      test-output: 'unit-tests-report.xml'
+      job-rules:
+        - when: on_success
+
+  - project: 'esab/abw/infra-and-test'
+    ref: $TEMPLATE_REPO_BRANCH
+    file: '.gitlab-ci/nix-adaptio-test.yml'
+    inputs:
+      job-name: 'block-tests:stage'
+      nix-attribute: '.#adaptio-tests'
+      test-target: 'adaptio-block-tests'
+      test-output: 'block-tests-report.xml'
+      job-rules:
+        - when: on_success
+
+  - project: 'esab/abw/infra-and-test'
+    ref: $TEMPLATE_REPO_BRANCH
+    file:
+      - '/.gitlab-ci/k8-runner-defaults.yml'
+      - '/.gitlab-ci/variables.yml'

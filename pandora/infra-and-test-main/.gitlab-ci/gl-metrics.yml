@@ -1,0 +1,110 @@
+spec:
+  inputs:
+    tags:
+      description: 'Runner selection tags'
+      type: array
+      default:
+        - smalls
+    # ── shared ──
+    job-name:
+      description: 'Name of the job'
+      type: string
+      default: 'push-gl-metrics'
+    job-stage:
+      description: 'Stage the job runs in'
+      type: string
+      default: 'report'
+    job-timeout:
+      description: 'Job timeout'
+      type: string
+      default: '5 minutes'
+    job-rules:
+      description: 'Rules controlling when the job runs'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    allow-failure:
+      description: 'Allow the job to fail without blocking the pipeline'
+      type: boolean
+      default: true
+    project-id:
+      description: >-
+        GitLab project ID or path to collect metrics for.
+        Defaults to the current pipeline project ($CI_PROJECT_PATH).
+      type: string
+      default: ''
+    pipeline-id:
+      description: >-
+        GitLab pipeline ID to collect metrics for.
+        Defaults to the current pipeline ($CI_PIPELINE_ID).
+        Ignored when ref is set.
+      type: string
+      default: ''
+    ref:
+      description: >-
+        Collect metrics from the latest pipeline on this ref instead of a
+        specific pipeline ID. Takes priority over pipeline-id.
+      type: string
+      default: ''
+    include-suite-metrics:
+      description: 'Push per-test-suite breakdown metrics'
+      type: boolean
+      default: true
+    include-test-cases:
+      description: 'Push per-test-case metrics (includes failure_reason label)'
+      type: boolean
+      default: true
+    metric-prefix:
+      description: 'Prefix applied to all metric names'
+      type: string
+      default: 'gitlab'
+    pushgateway-job:
+      description: 'Job label written to the Pushgateway'
+      type: string
+      default: 'gitlab_tests'
+---
+# Collects GitLab test report metrics and pushes them to a Prometheus Pushgateway.
+#
+# Required CI/CD variables (set at project or group level):
+#   PUSHGATEWAY_URL    - Full URL of the Pushgateway, e.g. https://pushgateway.example.com
+#
+# GitLab authentication uses CI_JOB_TOKEN automatically (no GITLAB_TOKEN needed).
+#
+# Optional CI/CD variables:
+#   PUSHGATEWAY_USER     - Basic auth username
+#   PUSHGATEWAY_PASSWORD - Basic auth password
+#   GITLAB_URL           - GitLab instance URL (default: https://gitlab.com)
+#   GITLAB_VERIFY_SSL    - Verify TLS certificates (default: true)
+'$[[ inputs.job-name ]]':
+  image: registry.gitlab.com/esab/abw/infra-and-test/gl-metrics:0.1.0
+  tags: $[[ inputs.tags ]]
+  stage: $[[ inputs.job-stage ]]
+  timeout: $[[ inputs.job-timeout ]]
+  rules: $[[ inputs.job-rules ]]
+  allow_failure: $[[ inputs.allow-failure ]]
+  variables:
+    GITLAB_TOKEN: $CI_JOB_TOKEN
+    _GL_PROJECT: '$[[ inputs.project-id ]]'
+    _GL_PIPELINE: '$[[ inputs.pipeline-id ]]'
+    _GL_REF: '$[[ inputs.ref ]]'
+  script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start gl_metrics "Pushing test metrics to Pushgateway" true
+    - |
+      PROJ="${_GL_PROJECT:-$CI_PROJECT_PATH}"
+      TARGET_ARG=""
+      if [ -n "$_GL_REF" ]; then
+        TARGET_ARG="--ref $_GL_REF"
+      elif [ -n "$_GL_PIPELINE" ]; then
+        TARGET_ARG="--pipeline-id $_GL_PIPELINE"
+      else
+        TARGET_ARG="--pipeline-id $CI_PIPELINE_ID"
+      fi
+      python -m gl_metrics.main \
+        --project-id "$PROJ" \
+        $TARGET_ARG \
+        --include-suite-metrics '$[[ inputs.include-suite-metrics ]]' \
+        --include-test-cases '$[[ inputs.include-test-cases ]]' \
+        --metric-prefix '$[[ inputs.metric-prefix ]]' \
+        --pushgateway-job '$[[ inputs.pushgateway-job ]]'
+    - section_end gl_metrics

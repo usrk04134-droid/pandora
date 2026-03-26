@@ -1,0 +1,67 @@
+# Template job for deploying an apax build to a PLC device.
+#
+# Note! This job depends on files located in the aws-platform repository.
+#
+# The "apax reset-plc" command will both build and deploy to the PLC device.
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'apax-deploy'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+    plc-config:
+      description: 'The plc configuration to use'
+      type: string
+      default: ''
+    image-version:
+      description: 'The version of the image to use'
+      type: string
+    login-token:
+      description: 'The token to use for apax login'
+      type: string
+    job-tags:
+      description: 'Tag to identify the job runner'
+      type: array
+    when:
+      description: 'When to run the job'
+      type: string
+      default: 'manual'
+---
+'$[[ inputs.job-name ]]':
+  rules: $[[ inputs.job-rules ]]
+  when: $[[ inputs.when ]]
+  stage: deploy
+  image: registry.gitlab.com/esab/abw/plc/aws-platform/aws-platform-env:$[[ inputs.image-version ]]
+  tags: $[[ inputs.job-tags ]]
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+  script:
+    - section_start connectivity_check "ping plc ip" true
+    - ping -c 4 192.168.100.10
+    - section_end connectivity_check
+
+    - section_start apax_login "apax login" true
+    - apax login -p $[[ inputs.login-token ]]
+    - section_end apax_login
+
+    - section_start apax_install "apax install" true
+    - apax install --copy-local
+    - section_end apax_install
+
+    - section_start apax_deploy "apax deploy"
+    - EXIT_CODE=0
+    - apax reset-plc $[[ inputs.plc-config ]] || EXIT_CODE=$?
+    - |
+      section_start workdir_tree "Working directory tree" true
+      tree -a .
+      section_end workdir_tree
+
+      if [ $EXIT_CODE -ne 0 ]; then
+        echo "apax reset-plc $[[ inputs.plc-config ]] failed with exit code $EXIT_CODE"
+      fi
+    - section_end apax_deploy
+    - exit $EXIT_CODE

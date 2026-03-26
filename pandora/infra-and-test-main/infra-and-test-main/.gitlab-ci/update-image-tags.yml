@@ -1,0 +1,85 @@
+# Template job for updating image tags in CI files after building images
+#
+# This job runs on the protected branch after image builds, updates the image tags
+# in .gitlab-ci.yml and included files, then creates and merges an MR automatically.
+#
+# Requires SERVICE_ACCOUNT_PAT, SERVICE_ACCOUNT_USER_NAME, SERVICE_ACCOUNT_EMAIL
+# to be available in the pipeline.
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'update-image-tags'
+    job-matrix:
+      description: 'The matrix of images to build'
+      type: array
+      default:
+        - IMG_NAME: ''
+          IMG_FILES: '.'
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_COMMIT_REF_PROTECTED == "true"'
+          changes:
+            # Exclude .md files (ruby fnmatch glob)
+            - $IMG_FILES/**/*{[^d],[^m]d,[^.]md}
+    job-stage:
+      description: 'The stage the job will run in'
+      type: string
+      default: 'deploy'
+    issue-id:
+      description: 'The issue ID to link the merge request to'
+      type: string
+      default: 'ADT-2527'
+---
+include:
+  - local: '/.gitlab-ci/variables.yml'
+  - local: '/.gitlab-ci/common.yml'
+  - local: '/.gitlab-ci/fetch-scripts.yml'
+
+'$[[ inputs.job-name ]]':
+  stage: $[[ inputs.job-stage ]]
+  rules: $[[ inputs.job-rules ]]
+  parallel:
+    matrix: $[[ inputs.job-matrix ]]
+  needs:
+    - job: 'build-and-push-image'
+      artifacts: true
+      optional: true
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.0
+  tags: [smalls]
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+    - !reference [.git-setup, script]
+    - !reference [.fetch-scripts, script]
+  script:
+    - |
+      # Read the new tag from the build artifact file
+      BUILD_ENV_FILE="${IMG_FILES}/build.env"
+      if [[ ! -f "$BUILD_ENV_FILE" ]]; then
+        echo "Build artifact not found for $IMG_NAME at $BUILD_ENV_FILE - build did not run, skipping update"
+        exit 0
+      fi
+      NEW_TAG=$(grep '^NAME_AND_TAG=' "$BUILD_ENV_FILE" | cut -d'=' -f2)
+      if [[ -z "$NEW_TAG" ]]; then
+        echo "NAME_AND_TAG not found in build.env for $IMG_NAME"
+        exit 1
+      fi
+      echo "Updating $IMG_NAME to $NEW_TAG"
+    - section_start update_tags "Update image tags in CI files"
+    - $SCRIPTS_DIR/update-image-tags.sh --image-name "$IMG_NAME" --new-tag "$NEW_TAG"
+    - section_end update_tags
+    - section_start create_mr "Create and merge MR"
+    - >
+      $SCRIPTS_DIR/create-and-merge-request.sh
+      --project-id ${CI_PROJECT_ID}
+      --token $SERVICE_ACCOUNT_PAT
+      --branch $CI_COMMIT_BRANCH
+      --all-tracked
+      --mr-title "chore: Update $IMG_NAME to $NEW_TAG"
+      --mr-branch-prefix "update-image-tag"
+      --jira-id "$[[ inputs.issue-id ]]"
+    - section_end create_mr

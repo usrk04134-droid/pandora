@@ -47,7 +47,7 @@ include:
 update-system-manifest:
   stage: $[[ inputs.job-stage ]]
   tags: [smalls]
-  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.0
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.6
   rules: $[[ inputs.job-rules ]]
   needs: $[[ inputs.job-needs ]]
   timeout: $[[ inputs.job-timeout ]]

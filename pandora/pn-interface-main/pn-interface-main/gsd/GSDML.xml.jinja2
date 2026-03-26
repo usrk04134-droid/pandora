@@ -1,0 +1,181 @@
+<ISO15745Profile xmlns="http://www.profibus.com/GSDML/2003/11/DeviceProfile" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.profibus.com/GSDML/2003/11/DeviceProfile ..\xsd\GSDML-DeviceProfile-V2.44.xsd">
+    <ProfileHeader>
+        <ProfileIdentification>PROFINET Device Profile</ProfileIdentification>
+        <ProfileRevision>1.00</ProfileRevision>
+        <ProfileName>Device Profile for PROFINET Devices</ProfileName>
+        <ProfileSource>PROFIBUS Nutzerorganisation e. V. (PNO)</ProfileSource>
+        <ProfileClassID>Device</ProfileClassID>
+        <ISO15745Reference>
+            <ISO15745Part>4</ISO15745Part>
+            <ISO15745Edition>1</ISO15745Edition>
+            <ProfileTechnology>GSDML</ProfileTechnology>
+        </ISO15745Reference>
+    </ProfileHeader>
+    <ProfileBody>
+        <DeviceIdentity VendorID="0x002A" DeviceID="0x0009">
+            <InfoText TextId="IDT_FamilyDescription"/>
+            <VendorName Value="ESAB"/>
+        </DeviceIdentity>
+        <DeviceFunction>
+            <Family MainFamily="Controllers" ProductFamily="Adaptio"/>
+        </DeviceFunction>
+        <ApplicationProcess>
+            <DeviceAccessPointList>
+                <DeviceAccessPointItem ID="DAP_1" PhysicalSlots="0..32" ModuleIdentNumber="0x00000001" MinDeviceInterval="32" DNS_CompatibleName="Adaptio-Controller" ObjectUUID_LocalIndex="1" FixedInSlots="0" MultipleWriteSupported="true" NameOfStationNotTransferable="true" DeviceAccessSupported="true" NumberOfDeviceAccessAR="1" ImplementationType="software" LLDP_NoD_Supported="true" PNIO_Version="V2.44" MaxSupportedRecordSize="32768" CheckDeviceID_Allowed="true" IOXS_Required="false" ResetToFactoryModes="2" AddressAssignment="LOCAL;DCP" SharedDeviceSupported="false">
+                    <ModuleInfo CategoryRef="IDC_Adaptio">
+                        <Name TextId="IDT_MODULE_NAME_Adaptio_Controller"/>
+                        <InfoText TextId="IDT_INFO_Adaptio_Controller"/>
+                        <VendorName Value="ESAB"/>
+                        <OrderNumber Value="6ES7195-3AA00-0YA1"/>
+                    </ModuleInfo>
+                    <CertificationInfo ConformanceClass="B" ApplicationClass="" NetloadClass="II" SecurityClass="1"/>
+                    <IOConfigData MaxInputLength="1440" MaxOutputLength="1440"/>
+                    <UseableModules>
+                        <ModuleItemRef ModuleItemTarget="IDM_OUTPUT" AllowedInSlots="1..32" FixedInSlots="1"/>
+                        <ModuleItemRef ModuleItemTarget="IDM_INPUT" AllowedInSlots="1..32" FixedInSlots="2"/>
+                    </UseableModules>
+                    <VirtualSubmoduleList>
+                        <VirtualSubmoduleItem ID="IDS_D01" IM5_Supported="true" SubmoduleIdentNumber="0x00000001" MayIssueProcessAlarm="true" Writeable_IM_Records="1 2 3 4">
+                            <IOData/>
+                            <ModuleInfo>
+                                <Name TextId="IDT_MODULE_NAME_Adaptio_Controller"/>
+                                <InfoText TextId="IDT_INFO_Adaptio_Controller"/>
+                            </ModuleInfo>
+                        </VirtualSubmoduleItem>
+                    </VirtualSubmoduleList>
+                    <SystemDefinedSubmoduleList>
+                        <InterfaceSubmoduleItem ID="IDS_1I" SubslotNumber="32768" SubmoduleIdentNumber="0x00000010" TextId="TOK_TextId_Interface_Name_Adaptio_Controller" DelayMeasurementSupported="false" SupportedProtocols="SNMP;LLDP" NetworkComponentDiagnosisSupported="false" DCP_BoundarySupported="true" PTP_BoundarySupported="true" DCP_FeaturesSupported="RejectDCPSet" SNMP_FeaturesSupported="SNMPAdjust" SupportedRT_Classes="RT_CLASS_1" PDEV_CombinedObjectSupported="true" Writeable_IM_Records="1 2 3 4" SupportedServiceProtocols="CLRPC" IM5_Supported="true">
+                            <ApplicationRelations NumberOfAR="1" NumberOfAdditionalInputCR="0" NumberOfAdditionalMulticastProviderCR="0" NumberOfAdditionalOutputCR="0" NumberOfMulticastConsumerCR="0" StartupMode="Advanced;Legacy" PullModuleAlarmSupported="false">
+                                <TimingProperties SendClock="32" ReductionRatio="1 2 4 8 16 32 64 128 256 512"/>
+                            </ApplicationRelations>
+                        </InterfaceSubmoduleItem>
+                        <PortSubmoduleItem ID="IDS_1P_RJ45" TextId="TOK_Text_Id_Port_RJ45_Desc" SubslotNumber="32769" SubmoduleIdentNumber="0x00000011" CheckMAUTypeDifferenceSupported="true" PortDeactivationSupported="false" LinkStateDiagnosisCapability="Up+Down" ShortPreamble100MBitSupported="false" CheckMAUTypeSupported="true" Writeable_IM_Records="1 2 3 4" IM5_Supported="true">
+                            <MAUTypeList>
+                                <MAUTypeItem Value="16" AdjustSupported="false"/>
+                                <MAUTypeItem Value="30" AdjustSupported="false"/>
+                            </MAUTypeList>
+                        </PortSubmoduleItem>
+                    </SystemDefinedSubmoduleList>
+                    <!-- <Graphics>
+                      <GraphicItemRef Type="DeviceSymbol" GraphicItemTarget="IDG_PNDriverDEVKIT"/>
+                    </Graphics> -->
+                    <AssetManagement/>
+                </DeviceAccessPointItem>
+            </DeviceAccessPointList>
+            <!-- ============================================================================================ -->
+            <!--   List of modules                                                                            -->
+            <!-- ============================================================================================ -->
+            <ModuleList>
+
+                <ModuleItem ID="IDM_OUTPUT" ModuleIdentNumber="0x0000000a">
+                    <ModuleInfo CategoryRef="IDC_ADAPTIO">
+                        <Name TextId="IDT_MODULE_NAME_OUTPUT"/>
+                        <InfoText TextId="IDT_INFO_TEXT_OUTPUT"/>
+                    </ModuleInfo>
+                    <VirtualSubmoduleList>
+                        <VirtualSubmoduleItem ID="IDS_OUTPUT_GROUP" SubmoduleIdentNumber="0x0001"
+                                              FixedInSubslots="1" Writeable_IM_Records="1 2 3 4" MayIssueProcessAlarm="false">
+                            <IOData>
+                                <Output Consistency="All items consistency">
+                                    {%- set ns = namespace(length = 0) -%}
+                                    {%- for input_name, input_type in data['inputs'].items() %}
+                                    {%- for data_item in data['structs'][input_type].datapoints %}
+                                      {%- set ns.length = ns.length + data_item.type|gsd_type|gsd_type_length %}
+                                    {%- endfor %}
+                                    {%- endfor %}
+                                    <DataItem DataType="OctetString" TextId="IDT_DATAITEM_OUTPUT" Length="{{ ns.length }}"/>
+                                </Output>
+                            </IOData>
+                            <ModuleInfo>
+                                <Name TextId="IDT_MODULE_NAME_OUTPUT"/>
+                                <InfoText TextId="IDT_INFO_TEXT_OUTPUT"/>
+                            </ModuleInfo>
+                        </VirtualSubmoduleItem>
+                    </VirtualSubmoduleList>
+                </ModuleItem>
+
+                <ModuleItem ID="IDM_INPUT" ModuleIdentNumber="0x0000000b">
+                    <ModuleInfo CategoryRef="IDC_ADAPTIO">
+                        <Name TextId="IDT_MODULE_NAME_INPUT"/>
+                        <InfoText TextId="IDT_INFO_TEXT_INPUT"/>
+                    </ModuleInfo>
+                    <VirtualSubmoduleList>
+                        <VirtualSubmoduleItem ID="IDS_INPUT_GROUP" SubmoduleIdentNumber="0x0001"
+                                              FixedInSubslots="1" Writeable_IM_Records="1 2 3 4" MayIssueProcessAlarm="false">
+                            <IOData>
+                                <Input Consistency="All items consistency">
+                                    {%- set ns = namespace(length = 0) -%}
+                                    {%- for output_name, output_type in data['outputs'].items() %}
+                                    {%- for data_item in data['structs'][output_type].datapoints %}
+                                      {%- set ns.length = ns.length + data_item.type|gsd_type|gsd_type_length %}
+                                    {%- endfor %}
+                                    {%- endfor %}
+                                    <DataItem DataType="OctetString" TextId="IDT_DATAITEM_INPUT" Length="{{ ns.length }}"/>
+                                </Input>
+                            </IOData>
+                            <ModuleInfo>
+                                <Name TextId="IDT_MODULE_NAME_INPUT"/>
+                                <InfoText TextId="IDT_INFO_TEXT_INPUT"/>
+                            </ModuleInfo>
+                        </VirtualSubmoduleItem>
+                    </VirtualSubmoduleList>
+                </ModuleItem>
+
+            </ModuleList>
+            <!-- ============================================================================================ -->
+            <!--   List of categories                                                                         -->
+            <!-- ============================================================================================ -->
+            <CategoryList>
+                <CategoryItem ID="IDC_Adaptio" TextId="TOK_ID_PL"/>
+                {%- for category in data['categories'] %}
+                <CategoryItem ID="IDC_{{ category.id }}" TextId="IDT_CATEGORY_{{ category.id }}"/>
+                {%- endfor %}
+            </CategoryList>
+            <!-- ============================================================================================ -->
+            <!--   ExternalTextList                                                                           -->
+            <!-- ============================================================================================ -->
+            <ExternalTextList>
+                <PrimaryLanguage>
+                    <!-- From Linux Native Example -->
+                    <Text TextId="IDT_MODULE_NAME_Adaptio_Controller" Value="Adaptio Controller"/>
+                    <Text TextId="TOK_TextId_Interface_Name_Adaptio_Controller" Value="Interface"/>
+                    <Text TextId="IDT_FamilyDescription" Value="PROFINET Driver for Adaptio Controller"/>
+                    <Text TextId="TOK_ID_PL" Value="PROFINET Driver"/>
+                    <Text TextId="IDT_INFO_Adaptio_Controller" Value="Adaptio Controller"/>
+                    <Text TextId="TOK_Text_Id_Port_RJ45_Desc" Value="RJ45"/>
+                    <Text TextId="T_general_parameter" Value="General parameter"/>
+
+                    <!-- Our defs start here -->
+                    <Text TextId="IDT_DAP_DESCRIPTION" Value="Supports RT communications."/>
+                    <Text TextId="IDT_DAP" Value="Adaptio Controller"/>
+                    <Text TextId="IDT_DEV_DESCRIPTION" Value="Adaptio Controller"/>
+
+                    <!--Identification-->
+                    <Text TextId="IDT_SS_INTERFACE" Value="X1"/>
+                    <Text TextId="IDT_SS_PORT1" Value="P1"/>
+                    <Text TextId="IDT_SS_PORT2" Value="P2"/>
+                    <Text TextId="IDT_INTERFACE" Value="Interface"/>
+                    <Text TextId="IDT_PORT1" Value="Port 1"/>
+                    <Text TextId="IDT_PORT2" Value="Port 2"/>
+
+                    <!--Vendor module category-->
+                    {% for category in data['categories'] -%}
+                    <Text TextId="IDT_CATEGORY_{{ category.id }}" Value="{{category.name}}" />
+                    {%- endfor %}
+
+                    <!-- Vendor module texts -->
+                    <Text TextId="IDT_INPUT" Value="Input"/>
+                    <Text TextId="IDT_OUTPUT" Value="Output"/>
+
+                    <Text TextId="IDT_MODULE_NAME_OUTPUT" Value="Output" />
+                    <Text TextId="IDT_INFO_TEXT_OUTPUT" Value="Outputs" />
+                    <Text TextId="IDT_DATAITEM_OUTPUT" Value="Output" />
+
+                    <Text TextId="IDT_MODULE_NAME_INPUT" Value="Input" />
+                    <Text TextId="IDT_INFO_TEXT_INPUT" Value="Inputs" />
+                    <Text TextId="IDT_DATAITEM_INPUT" Value="Input" />
+                </PrimaryLanguage>
+            </ExternalTextList>
+        </ApplicationProcess>
+    </ProfileBody>
+</ISO15745Profile>

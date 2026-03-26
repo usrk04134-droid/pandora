@@ -1,0 +1,390 @@
+##
+## !!!THIS IS ONLY TEMPORARY UNTIL THIS FILE FIND A NEW HOME IN A SEPARATE REPO!!!
+##
+structs:
+  AdaptioInput:
+    datapoints:
+      - name: commands
+        type: uint32_t
+        bitmask:
+          # Starts the currently selected sequence (of sequence type) if ready
+          - name: start
+            offset: 0
+          # Stops the currently executing sequence
+          - name: stop
+            offset: 1
+          # Shutdown
+          - name: shutdown
+            offset: 2
+      # Selected sequence
+      # JOINT_TRACKING = 1
+      # ADAPTIVE_WELDING = 2
+      # AUTOMATIC_CALIBRATION_MOVEMENT = 3 (This is unsettable by PLC)
+      # AUTOMATIC_CAPPING = 4
+      - name: sequence_type
+        type: uint32_t
+      - name: heartbeat
+        type: uint32_t
+      - name: reserved2
+        type: uint32_t
+      - name: reserved3
+        type: uint32_t
+      - name: reserved4
+        type: uint32_t
+
+  AdaptioOutput:
+    datapoints:
+      - name: status
+        type: uint32_t
+        bitmask:
+          # Adaptio is ready to accept start command
+          - name: ready
+            offset: 0
+          # Adaptio is currently running a sequence
+          - name: active
+            offset: 1
+          # Adaptio is experiencing an error
+          - name: error
+            offset: 2
+          # Ready to start joint tracking
+          - name: ready_for_tracking
+            offset: 3
+          # Ready to start abp/adaptive_welding
+          - name: ready_for_abp
+            offset: 4
+          # Ready to start cap (LP2)
+          - name: ready_for_cap
+            offset: 5
+          # Ready to start cap with placement (LP2.1)
+          - name: ready_for_auto_cap
+            offset: 6
+      # Active sequence
+      # JOINT_TRACKING = 1
+      # ADAPTIVE_WELDING = 2
+      # AUTOMATIC_CALIBRATION_MOVEMENT = 3
+      # AUTOMATIC_CAPPING = 4
+      - name: active_sequence_type
+        type: uint32_t
+      - name: heartbeat
+        type: uint32_t
+      - name: reserved7
+        type: uint32_t
+      - name: reserved8
+        type: uint32_t
+
+  AxisInput:
+    datapoints:
+      - name: status
+        type: uint32_t
+        bitmask:
+          # The axis is enabled
+          - name: enabled
+            offset: 0
+          # The axis is busy (currently executing a command)
+          - name: busy
+            offset: 1
+          # The axis is experiencing an error
+          - name: error
+            offset: 2
+          # The axis is in position
+          - name: in_position
+            offset: 3
+          # The axis is homed
+          - name: homed
+            offset: 4
+          # The type of axis:
+          # LONGITUDINAL = 0
+          # CIRCULAR = 1
+          - name: type
+            offset: 5
+          # The axis is currently following the command position (no execute is necessary)
+          - name: following_position
+            offset: 6
+      # Axis ID (only used internally)
+      - name: axis_id
+        type: uint32_t
+      # Actual position
+      # slide axis: mm
+      # circular weld axis: rad
+      # linear weld axis: mm
+      - name: position
+        type: float
+      # Actual velocity
+      # slide axis: mm/s
+      # circular weld axis: rad/s
+      # linear weld axis: mm/s
+      - name: velocity
+        type: float
+      - name: reserved17
+        type: uint32_t
+      - name: reserved18
+        type: uint32_t
+      - name: reserved19
+        type: uint32_t
+      - name: reserved20
+        type: uint32_t
+
+  AxisOutput:
+    datapoints:
+      - name: commands
+        type: uint32_t
+        bitmask:
+          # Requests the axis to execute a motion with the given parameters
+          - name: execute
+            offset: 0
+          # Requests the axis to stop as quickly as possible
+          - name: stop
+            offset: 1
+          # Requests the axis to follow position
+          - name: follow_position
+            offset: 2
+      # Axis ID (only used internally)
+      - name: axis_id
+        type: uint32_t
+      # Position set point
+      - name: position
+        type: float
+      # Velocity set point
+      - name: velocity
+        type: float
+      # Acceleration set point
+      - name: acceleration
+        type: float
+      # Jerk set point
+      - name: jerk
+        type: float
+      - name: reserved21
+        type: uint32_t
+      - name: reserved22
+        type: uint32_t
+      - name: reserved23
+        type: uint32_t
+      - name: reserved24
+        type: uint32_t
+
+  PowerSourceInput:
+    datapoints:
+      - name: status
+        type: uint32_t
+        bitmask:
+          # The power source is ready to start welding
+          - name: ready_to_start
+            offset: 0
+          # The power source is in a welding sequence
+          - name: in_welding_sequence
+            offset: 1
+          # The power source is arcing
+          - name: arcing
+            offset: 2
+          # The power source failed to start welding
+          - name: start_failure
+            offset: 3
+          # The power source is experiencing an error
+          # This may or may not be fatal (don't trust this)
+          - name: error
+            offset: 4
+          # ???
+          - name: deviation_setpoint_actual
+            offset: 5
+          # Twin wire
+          - name: twin_wire
+            offset: 6
+      # Actual voltage
+      - name: voltage
+        type: float
+      # Actual current
+      - name: current
+        type: float
+      # Actual wire speed (cm/min)
+      - name: wire_speed
+        type: float
+      # Actual ICE wire speed
+      - name: ice_wire_speed
+        type: float
+      # Actual deposition rate
+      - name: deposition_rate
+        type: float
+      # Actual heat input
+      - name: heat_input
+        type: float
+      # Distance from the torch associated with this power source to the leading torch (in mm, positive)
+      # For the leading torch this is 0
+      - name: distance_to_leading_torch
+        type: float
+      # Wire diameter (mm)
+      - name: wire_diameter
+        type: float
+      - name: reserved26
+        type: uint32_t
+      - name: reserved27
+        type: uint32_t
+      - name: reserved28
+        type: uint32_t
+
+  PowerSourceOutput:
+    datapoints:
+      - name: commands
+        type: uint32_t
+        bitmask:
+          # Requests the power source to start a weld
+          - name: start
+            offset: 0
+          # Requests the power source to stop
+          - name: quick_stop
+            offset: 1
+          # Requests the power source to output wire
+          - name: wire_down
+            offset: 2
+          # Requests the power source to retract wire
+          - name: wire_up
+            offset: 3
+          # Requests the power source to output ICE wire
+          - name: ice_wire_down
+            offset: 4
+          # Requests the power source to retract ICE wire
+          - name: ice_wire_up
+            offset: 5
+      # Sets the current weld method
+      # ???
+      - name: method
+        type: uint32_t
+      # Sets the current regulation type
+      # ???
+      - name: regulation_type
+        type: uint32_t
+      # Sets the start adjust
+      # ???
+      - name: start_adjust
+        type: uint32_t
+      # Sets start type:
+      # ???
+      - name: start_type
+        type: uint32_t
+      # Sets the voltage set point
+      - name: voltage
+        type: float
+      # Sets the current set point
+      - name: current
+        type: float
+      # Sets the wire speed set point
+      - name: wire_speed
+        type: float
+      # Sets the ICE wire speed set point
+      - name: ice_wire_speed
+        type: float
+      # Sets the AC frequency set point
+      - name: ac_frequency
+        type: float
+      # Sets the AC offset set point
+      - name: ac_offset
+        type: float
+      # Sets the AC phase shift set point
+      - name: ac_phase_shift
+        type: float
+      # Sets the crater fill time
+      - name: crater_fill_time
+        type: float
+      # Sets the burn back time
+      - name: burn_back_time
+        type: float
+      - name: reserved29
+        type: uint32_t
+      - name: reserved30
+        type: uint32_t
+      - name: reserved31
+        type: uint32_t
+      - name: reserved32
+        type: uint32_t
+
+  TrackInput:
+    datapoints:
+      # Horizontal offset
+      - name: horizontal_offset
+        type: float
+      # Vertical offset
+      - name: vertical_offset
+        type: float
+      # Joint tracking mode
+      # 0 is vertical and height tracking from left corner
+      # 1 is vertical and height tracking from right corner
+      # 2 is vertical and height tracking from middle of left and right corner
+      # 3 is height tracking only
+      - name: joint_tracking_mode
+        type: uint32_t
+      # Object length in weld direction (mm)
+      # Circular object: nominal or calibrated circumference (mm)
+      # Plate: nominal length (mm)
+      - name: object_path_length
+        type: float
+      # Edge tracker current value in mm
+      - name: edge_tracker_value
+        type: float
+      - name: status
+        type: uint32_t
+        bitmask:
+          # Edge tracker valid
+          - name: edge_tracker_value_valid
+            offset: 0
+          # The torch is at the object entry position
+          # (only used in linear welding)
+          - name: torch_at_entry_position
+            offset: 1
+      # Linear position in the weld direction (mm)
+      # Can be positive and negative
+      # Does not wrap but increases indefinitely in circular welding
+      - name: path_position
+        type: float
+
+  TrackOutput:
+    datapoints:
+      - name: status
+        type: uint32_t
+        bitmask:
+          # Tracking active
+          - name: active
+            offset: 0
+          # Groove shallow
+          - name: shallow
+            offset: 1
+          # Tracking error
+          - name: error
+            offset: 2
+      # Horizontal offset
+      - name: active_horizontal_offset
+        type: float
+      # Vertical offset
+      - name: active_vertical_offset
+        type: float
+      # Joint tracking mode
+      # 0 is vertical and height tracking from left corner
+      # 1 is vertical and height tracking from right corner
+      # 2 is vertical and height tracking from middle of left and right corner
+      # 3 is height tracking only
+      - name: active_joint_tracking_mode
+        type: uint32_t
+      # Target path_position at which the weld movement should stop (mm)
+      # (only used in linear welding)
+      - name: target_path_position
+        type: float
+
+inputs:
+  adaptio: AdaptioInput
+  slide_cross_x: AxisInput
+  slide_cross_y: AxisInput
+  weld_axis: AxisInput
+  power_source_1: PowerSourceInput
+  power_source_2: PowerSourceInput
+  tracking: TrackInput
+
+outputs:
+  adaptio: AdaptioOutput
+  slide_cross_x: AxisOutput
+  slide_cross_y: AxisOutput
+  weld_axis: AxisOutput
+  power_source_1: PowerSourceOutput
+  power_source_2: PowerSourceOutput
+  tracking: TrackOutput
+
+categories:
+  - id: ADAPTIO
+    name: Adaptio

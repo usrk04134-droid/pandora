@@ -1,0 +1,124 @@
+# Template for triggering a pipeline in another project to update a flake input
+#
+# The purpose of the jobs in this template is to analyze the change between the
+# current commit and the commit that is currently used as the flake input by the
+# target project. A downstream pipeline will be triggered to update the flake
+# input with the new revision in the target project.
+#
+# If the diff does not contain any product changes, the "default-commit-type"
+# will be used. This will allow us to update the flake input with a revision
+# that is not connected to a "feat", "fix" or "perf" commit.
+
+spec:
+  inputs:
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '10 minutes'
+    job-rules:
+      description: 'The list of rules: for the job'
+      type: array
+      default:
+        - if: $CI_COMMIT_REF_PROTECTED == "true"
+    target-project-name:
+      description: 'Name of the project where we want to update the flake'
+      type: string
+      default: 'adaptio-os'
+    nix-input-name:
+      description: 'Name of the input/dependency to update revision for in the flake.nix file'
+      type: string
+    default-commit-type:
+      description: 'If set, this will be used as COMMIT_TYPE, for non product related changes.'
+      type: string
+      default: 'chore'
+    branches:
+      description: 'Pattern for filtering out branches where the current commit revision exists'
+      type: string
+      default: 'origin/main origin/release/*'
+    when:
+      description: 'Condition for when the job runs'
+      type: string
+      default: manual
+
+---
+include:
+  - local: '/.gitlab-ci/variables.yml'
+  - local: '/.gitlab-ci/fetch-scripts.yml'
+
+.analyze-change: &analyze-change
+  - source $GITLAB_SHARED_FUNCS
+  - section_start analyze_change "Analyze diff between previous and new revision" true
+  - |
+    set -euo pipefail
+
+    [[ -z "$[[ inputs.nix-input-name ]]" ]]  && log_error "Missing 'nix-input-name'" && exit 1
+
+    PREV_REV=$(jq -r --arg input "$[[ inputs.nix-input-name ]]" '.nodes[$input].locked.rev' "$DOWNLOADED_FILE_PATH")
+
+    if [[ -z "$PREV_REV" || "$PREV_REV" == "null" ]]; then
+      log_error "Failed to get previous revision for $[[ inputs.nix-input-name ]]!"
+      exit 1
+    fi
+
+    log_debug "Analyze change between ${PREV_REV}..${CI_COMMIT_SHA} on ${CI_COMMIT_REF_NAME}"
+    tagger analyze multiple-merge-commits $CI_COMMIT_SHA $PREV_REV --dotenv
+
+    source tagger.env
+
+    # If the commit type is empty, we set it to the default-commit-type if that is set.
+    # This is useful for updating the flake input with a revision that is not connected to a feat, fix or perf commit
+    if [[ -z "${SEMVER_TYPE}" && -n "$[[ inputs.default-commit-type ]]" ]]; then
+      sed -i 's/^SEMVER_TYPE=$/SEMVER_TYPE=$[[ inputs.default-commit-type ]]/' tagger.env
+    fi
+
+  - section_end analyze_change
+
+'trigger-$[[ inputs.target-project-name ]]':
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.0
+  tags: [smalls]
+  stage: .post
+  when: $[[ inputs.when ]]
+  manual_confirmation: 'Are you sure you want to update the flake input for $[[ inputs.nix-input-name ]]?'
+  timeout: $[[ inputs.job-timeout ]]
+  rules: $[[ inputs.job-rules ]]
+  variables:
+    GIT_DEPTH: 0
+  before_script:
+    - !reference [.fetch-scripts, script]
+    - PROJ_ID=$($SCRIPTS_DIR/get-project-id.sh -p "$[[ inputs.target-project-name ]]" -t "$SERVICE_ACCOUNT_PAT")
+    - BRANCH_NAME=$($SCRIPTS_DIR/get-branch-name.sh -v -b "$[[ inputs.branches ]]" "$CI_COMMIT_SHA")
+    - >
+      DOWNLOADED_FILE_PATH=$($SCRIPTS_DIR/download-from-repository.sh
+      --project-id $PROJ_ID
+      --token "$SERVICE_ACCOUNT_PAT"
+      --ref $BRANCH_NAME
+      --source flake.lock
+      --output target-flake.lock)
+  script:
+    - *analyze-change
+    - echo "BRANCH_NAME=$BRANCH_NAME" >> tagger.env
+  artifacts:
+    when: always
+    expire_in: 72h
+    reports:
+      dotenv: tagger.env
+    paths:
+      - 'logs/*'
+
+'deploy-to-$[[ inputs.target-project-name ]]':
+  stage: .post
+  rules: $[[ inputs.job-rules ]]
+  needs:
+    - job: 'trigger-$[[ inputs.target-project-name ]]'
+      artifacts: true
+  variables:
+    COMMIT_TYPE: $SEMVER_TYPE
+    INPUT_NAME: $[[ inputs.nix-input-name ]]
+    INPUT_REV: $CI_COMMIT_SHA
+    INPUT_REF: $CI_COMMIT_REF_NAME
+    PIPELINE_NAME: 'Update flake input for $[[ inputs.nix-input-name ]]'
+  trigger:
+    project: esab/abw/$[[ inputs.target-project-name ]]
+    branch: $BRANCH_NAME
+    strategy: depend
+  allow_failure: false

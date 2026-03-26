@@ -74,7 +74,7 @@ include:
   - section_end analyze_change
 
 'trigger-$[[ inputs.target-project-name ]]':
-  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.0
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.6
   tags: [smalls]
   stage: .post
   when: $[[ inputs.when ]]

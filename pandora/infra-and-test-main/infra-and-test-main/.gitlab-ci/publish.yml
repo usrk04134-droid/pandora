@@ -1,0 +1,40 @@
+# The following variables are necessary for this job to work.
+#
+# PACKAGE_NAME:
+#   value: ""
+#   description: "Name used for the artifact on the GitLab package registry"
+# PACKAGE_VERSION:
+#   value: ""
+#   description: "Version of the artifact"
+# ARTIFACT_PATH:
+#   value: ""
+#   description: "Path of the artifact once the job is completed"
+.publish-artifact:
+  stage: publish
+  tags:
+   - adaptio-k8-2
+  image: curlimages/curl:8.10.1
+  variables:
+    PACKAGE_NAME:
+      value: ""
+    PACKAGE_VERSION:
+      value: ""
+    ARTIFACT_PATH:
+      value: ""
+  rules:
+    - if: '$CI_COMMIT_REF_PROTECTED == "true"'
+  script:
+    - source $GITLAB_SHARED_FUNCS
+    - section_start package_information "Information about the package"
+    - '[[ -z "$PACKAGE_NAME" ]] && echo "Error: PACKAGE_NAME is not set. Failing job." && exit 1'
+    - '[[ -z "$PACKAGE_VERSION" ]] && echo "Error: PACKAGE_VERSION is not set. Failing job." && exit 1'
+    - '[[ -z "$ARTIFACT_PATH" ]] && echo "Error: ARTIFACT_PATH does not exist. Failing job." && exit 1'
+    - 'echo "Publishing package to registry: ${BOLD}${YELLOW}$PACKAGE_NAME${RESET}"'
+    - 'echo "Package version: ${BOLD}${YELLOW}$PACKAGE_VERSION${RESET}"'
+    - 'echo "Selected Artifact: ${BOLD}${YELLOW}$ARTIFACT_PATH${RESET}"'
+    - section_end package_information
+    - section_start create_package "Create package in registry and push artifact"
+    - 'PACKAGE_REGISTRY_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${PACKAGE_VERSION}"'
+    - 'echo "Pushing to registry: $PACKAGE_REGISTRY_URL"'
+    - 'curl --fail-with-body --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$ARTIFACT_PATH" "$PACKAGE_REGISTRY_URL/$(basename "$ARTIFACT_PATH")"'
+    - section_end create_package

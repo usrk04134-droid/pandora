@@ -91,6 +91,15 @@ def test_parse_commit_message__type_with_scope_in_summary():
     assert type_of_change == "type"
 
 
+def test_parse_commit_message__gitlab_revert_summary():
+    summary = 'Revert "fix: Subject text"'
+
+    type_of_change, breaking_change = get_type_and_severity(summary, {})
+
+    assert type_of_change == "revert"
+    assert not breaking_change
+
+
 @patch("tagger.common.get_type_and_severity")
 def test_get_change_type__minor_feat(mock_parse_commit_msg):
     mock_parse_commit_msg.side_effect = [("fix", False), ("feat", False), ("perf", False)]
@@ -311,3 +320,27 @@ def test_get_change_type__pre_release(mock_parse_commit_msg):
 
     assert bump_name == "PRE_RELEASE"
     assert bump_type == "feat!"
+
+
+@patch("tagger.common.get_type_and_severity")
+def test_get_change_type__patch_revert(mock_parse_commit_msg):
+    mock_parse_commit_msg.side_effect = [("revert", False)]
+
+    mock_commit1 = MagicMock(spec=Commit)
+
+    mock_commit1.hexsha = "hexsha1"
+    mock_commit1.summary = 'Revert "fix: Summary1"'
+    mock_commit1.trailers_dict = {"Issues": ["NONE"]}
+
+    commits = [mock_commit1]
+
+    bump_name, bump_type = get_bump_operation(commits, pre_release=False)
+
+    assert bump_name == "PATCH"
+    assert bump_type == "revert"
+    mock_parse_commit_msg.assert_has_calls(
+        [
+            call('Revert "fix: Summary1"', {"Issues": ["NONE"]}),
+        ]
+    )
+    assert mock_parse_commit_msg.call_count == 1

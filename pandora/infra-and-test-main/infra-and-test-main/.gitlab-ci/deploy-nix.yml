@@ -1,0 +1,62 @@
+# Template job for Nix based deployment of default or specified target attribute.
+
+spec:
+  inputs:
+    job-name:
+      description: 'The name of the job'
+      type: string
+      default: 'deploy-adaptio'
+    job-timeout:
+      description: 'The timeout of the job'
+      type: string
+      default: '1 hour'
+    job-rules:
+      description: 'The list of rules: for the job'
+      type: array
+      default:
+        - if: $CI_COMMIT_REF_PROTECTED == "true"
+    nix-attribute:
+      description: 'The nix target attribute to build'
+      type: string
+      default: .#
+    post-build-hook:
+      description: 'If true, the post-build hook will be executed'
+      type: string
+      default: 'true'
+    hil-runner:
+      description: 'The HIL runner to use'
+      type: string
+      options:
+        - 'hil-gbg-01'
+        - 'hil-gbg-02'
+        - 'hil-chn-01'
+    when:
+      description: 'Condition for when the job runs'
+      type: string
+      default: manual
+
+---
+include:
+  - local: '/.gitlab-ci/hil-runner-defaults.yml'
+  - local: '/.gitlab-ci/fetch-scripts.yml'
+
+'$[[ inputs.job-name ]]':
+  image: registry.gitlab.com/esab/abw/infra-and-test/adaptio-ci:1.0.7
+  tags:
+    - $[[ inputs.hil-runner ]]
+  stage: deploy
+  when: $[[ inputs.when ]]
+  manual_confirmation: 'Are you sure you want to deploy to this environment?'
+  timeout: $[[ inputs.job-timeout ]]
+  rules: $[[ inputs.job-rules ]]
+  before_script:
+    - !reference [.hil-runner-defaults, before_script]
+    - !reference [.fetch-scripts, script]
+  script:
+    - >
+      $SCRIPTS_DIR/deploy-adaptio-os.sh
+      --target "$TARGET_HOST"
+      --flake "$[[ inputs.nix-attribute ]]"
+      --password "$SSHPASS"
+      --image-simulation
+      --verbose

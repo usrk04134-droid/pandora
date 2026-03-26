@@ -1,0 +1,141 @@
+# General information
+name: "@esab/aws-platform"
+version: 0.34.1
+type: app
+keywords:
+  - app
+author: ESAB R&D
+
+# Description will be displayed in the apax extension
+description: AWS PLC Platform
+
+# Install settings
+installStrategy: strict
+apaxVersion: 4.0.0
+
+# Targets which will be compiled with 'apax build'
+targets:
+  - "1500"
+  - "llvm"
+
+registries:
+  "@ax": "https://registry.simatic-ax.siemens.io/"
+
+dependencies:
+  "@ax/system": 10.2.7
+  "@ax/simatic-1500-alarming": 4.0.1
+  "@ax/simatic-1500-distributedio": 10.0.3
+  "@ax/simatic-1500-motioncontrol-v8": 9.0.3
+  "@ax/simatic-1500-motioncontrol-v8-mocking": 9.0.3
+  "@ax/simatic-1500-tasks": 10.0.2
+  "@ax/simatic-1500-technology-objects": 3.0.29
+
+devDependencies:
+  "@ax/axunit-mocking": 9.1.7
+  "@ax/certificate-management": 2.0.0
+  "@ax/performance-info": 1.1.2
+  "@ax/plc-control": 1.4.6
+  "@ax/plc-info": 4.1.0
+  "@ax/plc-web-app-manager": 1.1.0
+  "@ax/sdk": 2510.5.0
+  "@ax/st-lang-contrib-library-toolbox": 0.21.1
+  "@ax/dcp-utility": 1.2.0
+
+# Environment variables
+variables:
+  APAX_BUILD_ARGS:
+    - "--debug"
+  BIN_FOLDER: "./bin/1500"
+  IP_ADDRESS: 192.168.100.10
+
+# Apax scripts
+scripts:
+
+  # ---- BUILD SCRIPTS
+
+  prebuild:
+    - apax clean-configuration
+    - apax apply-configuration-layers
+
+  clean-configuration:
+    - rm -f src/Configuration/*.st
+    - rm -f src/Configuration/_components_
+
+  build-with-config:
+    - apax clean-configuration
+    - apax apply-configuration-layers "$1"
+    - apax run-command apax-build -v DEFINED_PREPROCESSOR_SYMBOLS=$(cat src/Configuration/_components_)
+
+  update-adaptio-interface:
+    - render-jinja ./src/Platform/Adaptio/AdaptioConfiguration.st ./src/Platform/Adaptio/AdaptioConfiguration.st.jinja2 "$PN_INTERFACE"
+
+  apply-configuration-layers:
+    - ./utilities/apply-configuration-layers.sh "$1"
+
+  # ---- PLC SCRIPTS
+
+  reset-plc:
+    - apax stop-plc
+  #  - apax load-empty # NOTE: Does not work correctly
+    - apax build-with-config "$1"
+    - apax load-plc
+    - apax start-plc
+
+  update-plc:
+    - apax build-with-config "$1"
+    - apax delta-load-plc-reinit
+
+  load-plc:
+    - apax sld load --input $BIN_FOLDER --target $IP_ADDRESS --accept-security-disclaimer --log debug --non-overwriting --mode full
+
+  load-plc-reinit:
+    - apax sld load --input $BIN_FOLDER --target $IP_ADDRESS --accept-security-disclaimer --log debug --non-overwriting --mode full --accept-reinit-variables
+
+  delta-load-plc-reinit:
+    - apax sld load --input $BIN_FOLDER --target $IP_ADDRESS --accept-security-disclaimer --log debug --non-overwriting --mode delta --accept-reinit-variables
+
+  load-plc-reset:
+    - apax sld load --input $BIN_FOLDER --target $IP_ADDRESS --accept-security-disclaimer --log debug --non-overwriting --mode reset --restart
+
+  stop-plc:
+    - apax plc-control stop -t $IP_ADDRESS
+
+  start-plc:
+    - apax plc-control run -t $IP_ADDRESS
+
+  restart-plc:
+    - apax stop-plc
+    - apax start-plc
+
+  get-certificate:
+    - mkdir -p .ax/certificates/
+    - apax plc-cert -t $IP_ADDRESS -o .ax/certificates/plc.pem
+
+  load-empty:
+    - apax sld load --input ./empty --target $IP_ADDRESS --accept-security-disclaimer --log debug --non-overwriting --mode full --accept-reinit-variables
+
+  # ---- DIAGNOSTICS SCRIPTS
+
+  show-alarms:
+    - apax plc-control alarms -t $IP_ADDRESS
+
+  ack-alarms:
+    - apax plc-control ack-alarms -t $IP_ADDRESS
+
+  monitor-file:
+    - apax mon -t $IP_ADDRESS --certificate .ax/certificates/plc.pem --input monitoring/$1 --continuous
+
+  monitor-symbols:
+    - apax mon -t $IP_ADDRESS --symbols "$1" --continuous
+
+  read-symbols:
+    - apax mon -t $IP_ADDRESS --symbols "$1"
+
+  modify-symbol:
+    - apax mod -t $IP_ADDRESS --symbol "$1" --value $2
+
+  compare:
+    - apax sld compare --mode delta --input $BIN_FOLDER --target $IP_ADDRESS
+
+  inspect:
+    - apax plc-info inspect -t $IP_ADDRESS

@@ -49,7 +49,7 @@ include:
     - job: 'build-and-push-image'
       artifacts: true
       optional: true
-  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.0
+  image: registry.gitlab.com/esab/abw/infra-and-test/tagger:1.1.6
   tags: [smalls]
   before_script:
     - source $GITLAB_SHARED_FUNCS

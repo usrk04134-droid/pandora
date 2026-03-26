@@ -1,0 +1,75 @@
+# This job will always trigger on a change to any .nix file in the project.
+
+spec:
+  inputs:
+    job-rules:
+      description: 'The list of rules for the job'
+      type: array
+      default:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+          interruptible: true
+          changes:
+            - '**/*.nix'
+    exclude-paths:
+      description: 'List of directories or files to exclude from the search'
+      type: array
+      default: []
+---
+lint-nix:
+  tags:
+    - smalls
+  stage: lint
+  image: registry.gitlab.com/esab/abw/infra-and-test/adaptio-ci:1.0.7
+  rules: $[[ inputs.job-rules ]]
+  before_script:
+    - source $GITLAB_SHARED_FUNCS
+  script:
+    - section_start lint_nix "Lint Nix files with nixfmt"
+    - |
+      raw_exclude="$[[ inputs.exclude-paths ]]"
+
+      # Remove square brackets
+      cleaned="${raw_exclude#[}"
+      cleaned="${cleaned%]}"
+
+      # Split on commas
+      IFS=',' read -r -a exclude_array <<< "$cleaned"
+
+      # Collect changed .nix files in this MR (excluding deleted files)
+      mapfile -t changed_files < <(git diff --name-only --diff-filter=d "$CI_MERGE_REQUEST_DIFF_BASE_SHA" "$CI_COMMIT_SHA" -- '*.nix')
+
+      if [[ ${#changed_files[@]} -eq 0 ]]; then
+        log_info "No changed Nix files found in this merge request"
+        section_end lint_nix
+        exit 0
+      fi
+
+      log_info "Found ${#changed_files[@]} changed Nix file(s)"
+
+      # Filter out excluded paths
+      files_to_check=()
+      for file in "${changed_files[@]}"; do
+        skip=false
+        for path in "${exclude_array[@]}"; do
+          path=$(echo "$path" | xargs)
+          if [[ -n "$path" ]] && ([[ "$file" == "$path" ]] || [[ "$file" == "$path/"* ]]); then
+            skip=true
+            break
+          fi
+        done
+
+        if [[ "$skip" == false ]]; then
+          files_to_check+=("$file")
+        fi
+      done
+
+      if [[ ${#files_to_check[@]} -eq 0 ]]; then
+        log_info "No Nix files to lint after exclusions"
+        section_end lint_nix
+        exit 0
+      fi
+
+      # Run nixfmt check on the files
+      log_info "Running: nixfmt --check on ${#files_to_check[@]} file(s)"
+      nix run .#nixfmt -- --check "${files_to_check[@]}"
+    - section_end lint_nix

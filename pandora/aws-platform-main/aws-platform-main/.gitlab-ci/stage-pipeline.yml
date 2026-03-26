@@ -1,0 +1,26 @@
+# This pipeline configuration is specifically for triggered pipelines from infra-and-test
+# It runs PLC APAX build and test jobs when triggered from infra-and-test
+# This file is conditionally included in .gitlab-ci.yml when PIPELINE_ENV == "stage"
+
+include:
+  - project: 'esab/abw/infra-and-test'
+    ref: $TEMPLATE_REPO_BRANCH
+    file: '/.gitlab-ci/plc-apax-build.yml'
+    inputs:
+      job-name: 'apax-build:stage'
+      image-version: '0.7.0'
+      login-token: $PLC_APAX_TOKEN
+      job-rules:
+        - when: on_success
+      job-matrix:
+        - PLC_CONFIG: ''
+
+  - project: 'esab/abw/infra-and-test'
+    ref: $TEMPLATE_REPO_BRANCH
+    file: '/.gitlab-ci/plc-apax-test.yml'
+    inputs:
+      job-name: 'apax-test:stage'
+      image-version: '0.7.0'
+      login-token: $PLC_APAX_TOKEN
+      job-rules:
+        - when: on_success
