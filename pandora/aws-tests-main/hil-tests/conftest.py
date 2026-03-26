@@ -1066,6 +1066,23 @@ def addresses_fixture() -> dict:
         "ps2_ready_to_start": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.ReadyToWeld',
         "ps1_arcing": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Arcing',
         "ps2_arcing": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Arcing',
+        # Power-source voltage / current setpoints (DataFromAdaptio)
+        "ps1_voltage_setpoint": '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource1.Voltage',
+        "ps1_current_setpoint": '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource1.Current',
+        "ps2_voltage_setpoint": '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource2.Voltage',
+        "ps2_current_setpoint": '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource2.Current',
+        # Power-source actual voltage / current (DataToAdaptio)
+        "ps1_voltage_actual": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Voltage',
+        "ps1_current_actual": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Current',
+        "ps2_voltage_actual": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Voltage',
+        "ps2_current_actual": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Current',
+        # Power-source status flags (DataToAdaptio)
+        "ps1_in_welding_sequence": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.InWeldingSequence',
+        "ps1_error": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Error',
+        "ps1_start_failure": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.StartFailure',
+        "ps2_in_welding_sequence": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.InWeldingSequence',
+        "ps2_error": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Error',
+        "ps2_start_failure": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.StartFailure',
     }
 
 
@@ -1835,6 +1852,54 @@ PLC_ADDR_PS2_READY_TO_START = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.P
 PLC_ADDR_PS1_ARCING = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Arcing'
 PLC_ADDR_PS2_ARCING = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Arcing'
 
+# DataFromAdaptio – setpoint values (Adaptio → PLC → power source)
+PLC_ADDR_PS1_VOLTAGE_SETPOINT = (
+    '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource1.Voltage'
+)
+PLC_ADDR_PS1_CURRENT_SETPOINT = (
+    '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource1.Current'
+)
+PLC_ADDR_PS2_VOLTAGE_SETPOINT = (
+    '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource2.Voltage'
+)
+PLC_ADDR_PS2_CURRENT_SETPOINT = (
+    '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource2.Current'
+)
+
+# DataToAdaptio – actual (feedback) values reported by the power source
+PLC_ADDR_PS1_VOLTAGE_ACTUAL = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Voltage'
+)
+PLC_ADDR_PS1_CURRENT_ACTUAL = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Current'
+)
+PLC_ADDR_PS2_VOLTAGE_ACTUAL = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Voltage'
+)
+PLC_ADDR_PS2_CURRENT_ACTUAL = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Current'
+)
+
+# DataToAdaptio – additional status flags
+PLC_ADDR_PS1_IN_WELDING_SEQ = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.InWeldingSequence'
+)
+PLC_ADDR_PS1_ERROR = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Error'
+)
+PLC_ADDR_PS1_START_FAILURE = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.StartFailure'
+)
+PLC_ADDR_PS2_IN_WELDING_SEQ = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.InWeldingSequence'
+)
+PLC_ADDR_PS2_ERROR = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Error'
+)
+PLC_ADDR_PS2_START_FAILURE = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.StartFailure'
+)
+
 
 def simulate_power_sources_ready(plc: "PlcJsonRpc") -> bool:
     """Read both power source ReadyToWeld flags via PLC.
@@ -1939,6 +2004,100 @@ def reset_plc_weld_signals(plc: "PlcJsonRpc") -> None:
             plc.write(addr, False)
         except Exception as exc:
             logger.debug(f"reset_plc_weld_signals: failed to reset {addr}: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# PLC power-source voltage / current / status helpers
+# ---------------------------------------------------------------------------
+
+
+def set_power_source_voltage(
+    plc: "PlcJsonRpc", voltage: float, ps: int = 1
+) -> bool:
+    """Write a voltage setpoint to a power source via PLC (DataFromAdaptio).
+
+    *ps* selects the power source (1 or 2).
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    addr = PLC_ADDR_PS1_VOLTAGE_SETPOINT if ps == 1 else PLC_ADDR_PS2_VOLTAGE_SETPOINT
+    try:
+        _, err = plc.write(addr, voltage)
+        if err:
+            logger.warning(f"set_power_source_voltage(ps={ps}) failed: {err}")
+            return False
+        return True
+    except Exception as exc:
+        logger.warning(f"set_power_source_voltage(ps={ps}) failed: {exc}")
+        return False
+
+
+def set_power_source_current(
+    plc: "PlcJsonRpc", current: float, ps: int = 1
+) -> bool:
+    """Write a current setpoint to a power source via PLC (DataFromAdaptio).
+
+    *ps* selects the power source (1 or 2).
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    addr = PLC_ADDR_PS1_CURRENT_SETPOINT if ps == 1 else PLC_ADDR_PS2_CURRENT_SETPOINT
+    try:
+        _, err = plc.write(addr, current)
+        if err:
+            logger.warning(f"set_power_source_current(ps={ps}) failed: {err}")
+            return False
+        return True
+    except Exception as exc:
+        logger.warning(f"set_power_source_current(ps={ps}) failed: {exc}")
+        return False
+
+
+def read_power_source_status(
+    plc: "PlcJsonRpc", ps: int = 1
+) -> dict | None:
+    """Read the current status of a power source via PLC (DataToAdaptio).
+
+    Returns a dict with keys:
+        ready_to_weld, in_welding_sequence, arcing, start_failure, error,
+        voltage, current
+    or ``None`` if any read fails.
+    """
+    if ps == 1:
+        addrs = {
+            "ready_to_weld": PLC_ADDR_PS1_READY_TO_START,
+            "in_welding_sequence": PLC_ADDR_PS1_IN_WELDING_SEQ,
+            "arcing": PLC_ADDR_PS1_ARCING,
+            "start_failure": PLC_ADDR_PS1_START_FAILURE,
+            "error": PLC_ADDR_PS1_ERROR,
+            "voltage": PLC_ADDR_PS1_VOLTAGE_ACTUAL,
+            "current": PLC_ADDR_PS1_CURRENT_ACTUAL,
+        }
+    else:
+        addrs = {
+            "ready_to_weld": PLC_ADDR_PS2_READY_TO_START,
+            "in_welding_sequence": PLC_ADDR_PS2_IN_WELDING_SEQ,
+            "arcing": PLC_ADDR_PS2_ARCING,
+            "start_failure": PLC_ADDR_PS2_START_FAILURE,
+            "error": PLC_ADDR_PS2_ERROR,
+            "voltage": PLC_ADDR_PS2_VOLTAGE_ACTUAL,
+            "current": PLC_ADDR_PS2_CURRENT_ACTUAL,
+        }
+
+    result: dict = {}
+    try:
+        for key, addr in addrs.items():
+            val, err = plc.read(addr)
+            if err:
+                logger.warning(
+                    f"read_power_source_status(ps={ps}): "
+                    f"failed to read {key} ({addr}): {err}"
+                )
+                return None
+            result[key] = val
+    except Exception as exc:
+        logger.warning(f"read_power_source_status(ps={ps}) failed: {exc}")
+        return None
+
+    return result
 
 
 # ---------------------------------------------------------------------------
