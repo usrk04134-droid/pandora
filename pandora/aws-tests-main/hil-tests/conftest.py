@@ -1062,8 +1062,8 @@ def addresses_fixture() -> dict:
         # Weld PLC addresses (DataToAdaptio)
         "weld_start": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Start',
         "weld_stop": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Stop',
-        "ps1_ready_to_start": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.ReadyToStart',
-        "ps2_ready_to_start": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.ReadyToStart',
+        "ps1_ready_to_start": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.ReadyToWeld',
+        "ps2_ready_to_start": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.ReadyToWeld',
         "ps1_arcing": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Arcing',
         "ps2_arcing": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Arcing',
     }
@@ -1825,22 +1825,25 @@ def receive_arc_state(web_hmi: AdaptioWebHmi, max_retries: int = 10) -> str | No
 
 
 # ---------------------------------------------------------------------------
-# PLC weld helper functions
-#
-# These helpers follow the joint-tracking pattern: each function receives
-# an ``addresses`` dict (from the ``addresses`` fixture) so that PLC
-# address strings are centralised in one place.
+# PLC weld address constants
 # ---------------------------------------------------------------------------
 
-def simulate_power_sources_ready(plc: "PlcJsonRpc", addresses: dict) -> bool:
-    """Set both power sources to READY_TO_START via PLC.
+PLC_ADDR_START = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Start'
+PLC_ADDR_STOP = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Stop'
+PLC_ADDR_PS1_READY_TO_START = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.ReadyToWeld'
+PLC_ADDR_PS2_READY_TO_START = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.ReadyToWeld'
+PLC_ADDR_PS1_ARCING = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Arcing'
+PLC_ADDR_PS2_ARCING = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Arcing'
 
-    This triggers CONFIGURED → READY in the arc state machine.
-    Returns ``True`` on success, ``False`` on failure.
+
+def simulate_power_sources_ready(plc: "PlcJsonRpc") -> bool:
+    """Read both power source ReadyToWeld flags via PLC.
+
+    Returns ``True`` if both reads succeed, ``False`` on failure.
     """
     try:
-        _, err1 = plc.write(addresses["ps1_ready_to_start"], True)
-        _, err2 = plc.write(addresses["ps2_ready_to_start"], True)
+        _, err1 = plc.read(PLC_ADDR_PS1_READY_TO_START)
+        _, err2 = plc.read(PLC_ADDR_PS2_READY_TO_START)
         if err1 or err2:
             logger.warning(f"simulate_power_sources_ready failed: err1={err1}, err2={err2}")
             return False
@@ -1850,14 +1853,14 @@ def simulate_power_sources_ready(plc: "PlcJsonRpc", addresses: dict) -> bool:
         return False
 
 
-def simulate_weld_start(plc: "PlcJsonRpc", addresses: dict) -> bool:
+def simulate_weld_start(plc: "PlcJsonRpc") -> bool:
     """Press the start button via PLC.
 
     This triggers READY → STARTING in the arc state machine.
     Returns ``True`` on success, ``False`` on failure.
     """
     try:
-        _, err = plc.write(addresses["weld_start"], True)
+        _, err = plc.write(PLC_ADDR_START, True)
         if err:
             logger.warning(f"simulate_weld_start failed: {err}")
             return False
@@ -1867,14 +1870,14 @@ def simulate_weld_start(plc: "PlcJsonRpc", addresses: dict) -> bool:
         return False
 
 
-def simulate_arcing(plc: "PlcJsonRpc", addresses: dict) -> bool:
+def simulate_arcing(plc: "PlcJsonRpc") -> bool:
     """Set power source 1 to ARCING via PLC.
 
     This triggers STARTING → ACTIVE in the arc state machine.
     Returns ``True`` on success, ``False`` on failure.
     """
     try:
-        _, err = plc.write(addresses["ps1_arcing"], True)
+        _, err = plc.write(PLC_ADDR_PS1_ARCING, True)
         if err:
             logger.warning(f"simulate_arcing failed: {err}")
             return False
@@ -1884,14 +1887,14 @@ def simulate_arcing(plc: "PlcJsonRpc", addresses: dict) -> bool:
         return False
 
 
-def simulate_weld_stop(plc: "PlcJsonRpc", addresses: dict) -> bool:
+def simulate_weld_stop(plc: "PlcJsonRpc") -> bool:
     """Press the stop button via PLC.
 
     This sends the stop command to the weld system (from STARTING or ACTIVE).
     Returns ``True`` on success, ``False`` on failure.
     """
     try:
-        _, err = plc.write(addresses["weld_stop"], True)
+        _, err = plc.write(PLC_ADDR_STOP, True)
         if err:
             logger.warning(f"simulate_weld_stop failed: {err}")
             return False
@@ -1901,7 +1904,7 @@ def simulate_weld_stop(plc: "PlcJsonRpc", addresses: dict) -> bool:
         return False
 
 
-def simulate_arcing_stopped(plc: "PlcJsonRpc", addresses: dict) -> bool:
+def simulate_arcing_stopped(plc: "PlcJsonRpc") -> bool:
     """Clear the ARCING flag on power source 1 via PLC.
 
     When no power source is ARCING the arc state machine transitions
@@ -1909,7 +1912,7 @@ def simulate_arcing_stopped(plc: "PlcJsonRpc", addresses: dict) -> bool:
     Returns ``True`` on success, ``False`` on failure.
     """
     try:
-        _, err = plc.write(addresses["ps1_arcing"], False)
+        _, err = plc.write(PLC_ADDR_PS1_ARCING, False)
         if err:
             logger.warning(f"simulate_arcing_stopped failed: {err}")
             return False
@@ -1919,23 +1922,23 @@ def simulate_arcing_stopped(plc: "PlcJsonRpc", addresses: dict) -> bool:
         return False
 
 
-def reset_plc_weld_signals(plc: "PlcJsonRpc", addresses: dict) -> None:
+def reset_plc_weld_signals(plc: "PlcJsonRpc") -> None:
     """Reset all PLC weld signals to their default (off) state.
 
     Called during teardown to leave the PLC in a clean state.
     """
-    for key in (
-        "weld_start",
-        "weld_stop",
-        "ps1_ready_to_start",
-        "ps2_ready_to_start",
-        "ps1_arcing",
-        "ps2_arcing",
+    for addr in (
+        PLC_ADDR_START,
+        PLC_ADDR_STOP,
+        PLC_ADDR_PS1_READY_TO_START,
+        PLC_ADDR_PS2_READY_TO_START,
+        PLC_ADDR_PS1_ARCING,
+        PLC_ADDR_PS2_ARCING,
     ):
         try:
-            plc.write(addresses[key], False)
+            plc.write(addr, False)
         except Exception as exc:
-            logger.debug(f"reset_plc_weld_signals: failed to reset {key}: {exc}")
+            logger.debug(f"reset_plc_weld_signals: failed to reset {addr}: {exc}")
 
 
 # ---------------------------------------------------------------------------
