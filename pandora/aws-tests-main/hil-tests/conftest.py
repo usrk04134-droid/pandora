@@ -291,6 +291,10 @@ def pytest_configure(config: pytest.Config) -> None:
 
     config.WEB_HMI_URI = f"ws://{config.ADAPTIO_EXTERNAL_IP}:8080"
 
+    # Bench power supply (AimTTi CPX200DP)
+    config.BENCH_PSU_IP = "192.168.100.231"
+    config.BENCH_PSU_PORT = 9221
+
     # Testrail
 
     config.TESTRAIL_URL = "https://esabgrnd.testrail.com"
@@ -846,6 +850,35 @@ def setup_plc_fixture(request: pytest.FixtureRequest) -> Iterator[PlcJsonRpc]:
     yield plc
 
     plc.logout()
+
+
+@pytest.fixture(name="bench_psu", scope="module")
+def bench_psu_fixture(request: pytest.FixtureRequest):
+    """Connect to the bench power supply (AimTTi CPX200DP) on the HIL.
+
+    Yields an ``AbstractPowerSupply`` instance.  Disables all outputs and
+    disconnects during teardown.
+    """
+    from testzilla.power_supply import PowerSupplyFactory
+
+    ip = request.config.BENCH_PSU_IP
+    port = request.config.BENCH_PSU_PORT
+    psu = PowerSupplyFactory.create(
+        "aimtti_cpx200dp", {"ip_address": ip, "port": port}
+    )
+    psu.connect()
+    identity = psu.read_identity()
+    logger.info(f"Bench PSU connected: {identity}")
+
+    yield psu
+
+    # Teardown: disable outputs and disconnect
+    for out in psu.available_outputs:
+        try:
+            psu.disable_output(out)
+        except Exception as exc:
+            logger.debug(f"bench_psu teardown: failed to disable output {out}: {exc}")
+    psu.disconnect()
 
 
 
@@ -1902,13 +1935,15 @@ PLC_ADDR_PS2_START_FAILURE = (
 
 
 def simulate_power_sources_ready(plc: "PlcJsonRpc") -> bool:
-    """Read both power source ReadyToWeld flags via PLC.
+    """Set both power source ReadyToWeld flags to True via PLC.
 
-    Returns ``True`` if both reads succeed, ``False`` on failure.
+    This simulates the power sources reporting ready, which triggers the
+    arc state machine transition CONFIGURED → READY.
+    Returns ``True`` if both writes succeed, ``False`` on failure.
     """
     try:
-        _, err1 = plc.read(PLC_ADDR_PS1_READY_TO_START)
-        _, err2 = plc.read(PLC_ADDR_PS2_READY_TO_START)
+        _, err1 = plc.write(PLC_ADDR_PS1_READY_TO_START, True)
+        _, err2 = plc.write(PLC_ADDR_PS2_READY_TO_START, True)
         if err1 or err2:
             logger.warning(f"simulate_power_sources_ready failed: err1={err1}, err2={err2}")
             return False
@@ -2098,6 +2133,30 @@ def read_power_source_status(
         return None
 
     return result
+
+
+def enable_bench_psu_output(
+    psu,
+    voltage: float,
+    current: float,
+    output: int = 1,
+) -> bool:
+    """Configure and enable a bench power-supply output.
+
+    Sets *voltage* and *current* on the given *output*, then enables it.
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    try:
+        psu.set_voltage(voltage, output)
+        psu.set_current(current, output)
+        psu.enable_output(output)
+        logger.info(
+            f"Bench PSU output {output}: {voltage} V / {current} A enabled"
+        )
+        return True
+    except Exception as exc:
+        logger.warning(f"enable_bench_psu_output(output={output}) failed: {exc}")
+        return False
 
 
 # ---------------------------------------------------------------------------

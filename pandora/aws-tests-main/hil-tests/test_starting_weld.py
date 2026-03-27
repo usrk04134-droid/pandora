@@ -31,12 +31,16 @@ from conftest import (
     delete_adaptio_database,
     add_weld_data_set,
     add_weld_process_parameters,
+    enable_bench_psu_output,
     get_weld_data_sets,
     get_weld_process_parameters,
     get_weld_process_parameters_config,
+    read_power_source_status,
     receive_arc_state,
     reset_plc_weld_signals,
     select_weld_data_set,
+    set_power_source_current,
+    set_power_source_voltage,
     simulate_arcing,
     simulate_arcing_stopped,
     simulate_power_sources_ready,
@@ -369,3 +373,68 @@ class TestStartingWeld:
         assert state is not None, "Should receive arc state update after stop"
         logger.info(f"Arc state after stop: {state}")
         assert state == "ready", f"Arc state should transition to 'ready', got '{state}'"
+
+    @pytest.mark.gen2
+    @pytest.mark.plc_only
+    def test_bench_psu_set_voltage_current_and_check_status(
+        self,
+        web_hmi: AdaptioWebHmi,
+        setup_plc: PlcJsonRpc,
+        bench_psu,
+        weld_data_set_setup,
+    ):
+        """Enable bench PSU, set voltage/current, trigger READY, and verify power source status."""
+        plc = setup_plc
+        try:
+            reset_plc_weld_signals(plc)
+        except Exception as exc:
+            logger.debug(f"reset_plc_weld_signals failed (non-fatal): {exc}")
+
+        # 1. Subscribe to arc state and select WDS → CONFIGURED
+        initial_state = subscribe_arc_state(web_hmi)
+        if initial_state is None:
+            pytest.skip("Device does not support SubscribeArcState")
+
+        wds_id = weld_data_set_setup["wds_id"]
+        result = select_weld_data_set(web_hmi, weld_data_set_id=wds_id)
+        assert result, "Selecting weld data set should succeed"
+
+        if initial_state != "configured":
+            state = receive_arc_state(web_hmi)
+            assert state == "configured", f"Expected 'configured', got '{state}'"
+
+        # 2. Enable bench PSU output with voltage and current
+        assert enable_bench_psu_output(
+            bench_psu, voltage=25.0, current=0.5, output=1
+        ), "Bench PSU output should be enabled"
+
+        # 3. Set PLC setpoint values for power source 1
+        assert set_power_source_voltage(plc, voltage=25.0, ps=1), (
+            "Setting PS1 voltage setpoint should succeed"
+        )
+        assert set_power_source_current(plc, current=0.5, ps=1), (
+            "Setting PS1 current setpoint should succeed"
+        )
+
+        # 4. Signal both power sources READY via PLC → CONFIGURED → READY
+        assert simulate_power_sources_ready(plc), (
+            "Setting power sources ReadyToWeld should succeed"
+        )
+        time.sleep(1)  # allow PLC → Adaptio propagation
+
+        state = receive_arc_state(web_hmi, max_retries=15)
+        assert state is not None, "Should receive arc state update after power sources ready"
+        logger.info(f"Arc state after power sources ready: {state}")
+        assert state == "ready", f"Expected 'ready', got '{state}'"
+
+        # 5. Read power source status and verify
+        status = read_power_source_status(plc, ps=1)
+        assert status is not None, "read_power_source_status should succeed"
+        logger.info(f"Power source 1 status: {status}")
+
+        assert status["ready_to_weld"] is True, (
+            f"PS1 should be ready_to_weld, got {status['ready_to_weld']}"
+        )
+        assert status["error"] is not True, (
+            f"PS1 should not be in error state, got {status['error']}"
+        )
