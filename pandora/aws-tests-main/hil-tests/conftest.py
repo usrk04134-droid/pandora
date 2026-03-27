@@ -852,33 +852,46 @@ def setup_plc_fixture(request: pytest.FixtureRequest) -> Iterator[PlcJsonRpc]:
     plc.logout()
 
 
-@pytest.fixture(name="bench_psu", scope="module")
-def bench_psu_fixture(request: pytest.FixtureRequest):
-    """Connect to the bench power supply (AimTTi CPX200DP) on the HIL.
+@pytest.fixture(name="bench_power_supply", scope="module")
+def bench_power_supply_fixture(setup_plc: PlcJsonRpc, request: pytest.FixtureRequest):
+    """Connect to the bench power supply (Keysight / AimTTi) for HIL tests.
 
-    Yields an ``AbstractPowerSupply`` instance.  Disables all outputs and
-    disconnects during teardown.
+    The supply is used to inject a voltage into the Aristo PAB so the PLC
+    sees a real "arcing" signal instead of a simulated PLC bit.
+
+    Yields the AbstractPowerSupply instance; tears down (disable output,
+    disconnect) after the module.
     """
-    from testzilla.power_supply import PowerSupplyFactory
+    from testzilla.power_supply.power_supply_factory import PowerSupplyFactory
+    # ensure implementations are registered
+    import testzilla.power_supply.keysight_e36234a  # noqa: F401
+    import testzilla.power_supply.aimtti_cpx200dp  # noqa: F401
 
     ip = request.config.BENCH_PSU_IP
+    if not ip:
+        pytest.skip("Bench power supply not configured")
+
+    conn = {"ip_address": ip}
     port = request.config.BENCH_PSU_PORT
-    psu = PowerSupplyFactory.create(
-        "aimtti_cpx200dp", {"ip_address": ip, "port": port}
-    )
+    if port:
+        conn["port"] = port
+
+    psu = PowerSupplyFactory.create("aimtti_cpx200dp", conn)
+
     psu.connect()
-    identity = psu.read_identity()
-    logger.info(f"Bench PSU connected: {identity}")
+    logger.info(f"Bench PSU connected: {psu.read_identity()}")
+    plc = setup_plc
+    plc.write(PLC_ADDR_PS1_ARCING, True)
 
     yield psu
 
-    # Teardown: disable outputs and disconnect
-    for out in psu.available_outputs:
+    for output in psu.available_outputs:
         try:
-            psu.disable_output(out)
-        except Exception as exc:
-            logger.debug(f"bench_psu teardown: failed to disable output {out}: {exc}")
+            psu.disable_output(output)
+        except Exception:
+            pass
     psu.disconnect()
+    logger.info("Bench PSU disconnected")
 
 
 
@@ -1957,6 +1970,7 @@ def simulate_weld_start(plc: "PlcJsonRpc") -> bool:
     """Press the start button via PLC.
 
     This triggers READY → STARTING in the arc state machine.
+    The start signal is pulsed (True → 0.3 s → False).
     Returns ``True`` on success, ``False`` on failure.
     """
     try:
@@ -1964,26 +1978,41 @@ def simulate_weld_start(plc: "PlcJsonRpc") -> bool:
         if err:
             logger.warning(f"simulate_weld_start failed: {err}")
             return False
+        time.sleep(0.3)
+        plc.write(PLC_ADDR_START, False)
         return True
     except Exception as exc:
         logger.warning(f"simulate_weld_start failed: {exc}")
         return False
 
 
-def simulate_arcing(plc: "PlcJsonRpc") -> bool:
-    """Set power source 1 to ARCING via PLC.
+def simulate_arcing(psu) -> bool:
+    """Apply arc voltage via the bench power supply.
 
-    This triggers STARTING → ACTIVE in the arc state machine.
+    This triggers STARTING → ACTIVE in the arc state machine by causing
+    the Aristo PAB to detect an arcing signal through the hardware chain.
     Returns ``True`` on success, ``False`` on failure.
     """
     try:
-        _, err = plc.write(PLC_ADDR_PS1_ARCING, True)
-        if err:
-            logger.warning(f"simulate_arcing failed: {err}")
-            return False
+        apply_arc_voltage(psu)
         return True
     except Exception as exc:
         logger.warning(f"simulate_arcing failed: {exc}")
+        return False
+
+
+def simulate_arcing_stopped(psu) -> bool:
+    """Remove arc voltage via the bench power supply.
+
+    When the Aristo PAB no longer detects arcing the arc state machine
+    transitions ACTIVE → READY (after stop).
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    try:
+        remove_arc_voltage(psu)
+        return True
+    except Exception as exc:
+        logger.warning(f"simulate_arcing_stopped failed: {exc}")
         return False
 
 
@@ -2001,24 +2030,6 @@ def simulate_weld_stop(plc: "PlcJsonRpc") -> bool:
         return True
     except Exception as exc:
         logger.warning(f"simulate_weld_stop failed: {exc}")
-        return False
-
-
-def simulate_arcing_stopped(plc: "PlcJsonRpc") -> bool:
-    """Clear the ARCING flag on power source 1 via PLC.
-
-    When no power source is ARCING the arc state machine transitions
-    ACTIVE → READY.
-    Returns ``True`` on success, ``False`` on failure.
-    """
-    try:
-        _, err = plc.write(PLC_ADDR_PS1_ARCING, False)
-        if err:
-            logger.warning(f"simulate_arcing_stopped failed: {err}")
-            return False
-        return True
-    except Exception as exc:
-        logger.warning(f"simulate_arcing_stopped failed: {exc}")
         return False
 
 
@@ -2157,6 +2168,39 @@ def enable_bench_psu_output(
     except Exception as exc:
         logger.warning(f"enable_bench_psu_output(output={output}) failed: {exc}")
         return False
+
+
+# ---------------------------------------------------------------------------
+# Arcing via bench power supply helpers
+# ---------------------------------------------------------------------------
+
+ARCING_VOLTAGE = 25.0
+ARCING_CURRENT_LIMIT = 0.5
+
+
+def apply_arc_voltage(psu, voltage: float = ARCING_VOLTAGE, output: int = 1) -> None:
+    """Set voltage on the bench PSU so the Aristo PAB sees an arcing signal."""
+    psu.set_voltage(voltage, output)
+    psu.set_current(ARCING_CURRENT_LIMIT, output)
+    psu.enable_output(output)
+    logger.info(f"Bench PSU output {output}: {voltage} V / {ARCING_CURRENT_LIMIT} A enabled")
+
+
+def remove_arc_voltage(psu, output: int = 1) -> None:
+    """Remove voltage from the bench PSU to stop the arcing signal."""
+    psu.set_voltage(0.0, output)
+    psu.disable_output(output)
+    logger.info(f"Bench PSU output {output} disabled")
+
+
+def wait_for_plc_value(plc: "PlcJsonRpc", address: str, expected, retries: int = 20, interval: float = 0.5):
+    """Poll a PLC variable until it matches *expected* or retries are exhausted."""
+    for _ in range(retries):
+        value, _ = plc.read(var=address)
+        if value == expected:
+            return value
+        time.sleep(interval)
+    return value
 
 
 # ---------------------------------------------------------------------------

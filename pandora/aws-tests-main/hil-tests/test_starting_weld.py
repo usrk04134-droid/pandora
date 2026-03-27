@@ -31,12 +31,14 @@ from conftest import (
     delete_adaptio_database,
     add_weld_data_set,
     add_weld_process_parameters,
+    apply_arc_voltage,
     enable_bench_psu_output,
     get_weld_data_sets,
     get_weld_process_parameters,
     get_weld_process_parameters_config,
     read_power_source_status,
     receive_arc_state,
+    remove_arc_voltage,
     reset_plc_weld_signals,
     select_weld_data_set,
     set_power_source_current,
@@ -47,6 +49,7 @@ from conftest import (
     simulate_weld_start,
     simulate_weld_stop,
     subscribe_arc_state,
+    wait_for_plc_value,
 )
 from managers import AdaptioManager
 from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi
@@ -286,10 +289,11 @@ class TestStartingWeld:
     @pytest.mark.gen2
     @pytest.mark.plc_only
     def test_arc_state_active_after_arcing(
-        self, web_hmi: AdaptioWebHmi, setup_plc: PlcJsonRpc, weld_data_set_setup
+        self, web_hmi: AdaptioWebHmi, setup_plc: PlcJsonRpc, bench_power_supply, weld_data_set_setup
     ):
         """STARTING → ACTIVE when a power source reports ARCING."""
         plc = setup_plc
+        psu = bench_power_supply
         try:
             reset_plc_weld_signals(plc)
         except Exception as exc:
@@ -315,9 +319,9 @@ class TestStartingWeld:
         time.sleep(0.5)
         receive_arc_state(web_hmi)  # consume STARTING
 
-        # PLC mode: power source 1 starts arcing → ACTIVE
-        assert simulate_arcing(plc), "Simulate arcing should succeed"
-        time.sleep(0.5)  # allow PLC→Adaptio propagation
+        # Bench PSU: apply arc voltage → ACTIVE
+        assert simulate_arcing(psu), "Simulate arcing should succeed"
+        time.sleep(0.5)  # allow hardware chain propagation
 
         state = receive_arc_state(web_hmi, max_retries=10)
         assert state is not None, "Should receive arc state update after arcing"
@@ -327,10 +331,11 @@ class TestStartingWeld:
     @pytest.mark.gen2
     @pytest.mark.plc_only
     def test_arc_state_ready_after_stop(
-        self, web_hmi: AdaptioWebHmi, setup_plc: PlcJsonRpc, weld_data_set_setup
+        self, web_hmi: AdaptioWebHmi, setup_plc: PlcJsonRpc, bench_power_supply, weld_data_set_setup
     ):
         """ACTIVE → READY when stop is pressed and arcing ceases."""
         plc = setup_plc
+        psu = bench_power_supply
         try:
             reset_plc_weld_signals(plc)
         except Exception as exc:
@@ -356,7 +361,7 @@ class TestStartingWeld:
         time.sleep(0.5)
         receive_arc_state(web_hmi)  # consume STARTING
 
-        assert simulate_arcing(plc), "Simulate arcing should succeed"
+        assert simulate_arcing(psu), "Simulate arcing should succeed"
         time.sleep(0.5)
         state = receive_arc_state(web_hmi)
         assert state == "active", f"Expected 'active', got '{state}'"
@@ -365,8 +370,8 @@ class TestStartingWeld:
         assert simulate_weld_stop(plc), "Weld stop should succeed"
         time.sleep(0.5)
 
-        # Clear arcing on power source → READY
-        assert simulate_arcing_stopped(plc), "Clearing arcing should succeed"
+        # Remove arc voltage → READY
+        assert simulate_arcing_stopped(psu), "Clearing arcing should succeed"
         time.sleep(0.5)
 
         state = receive_arc_state(web_hmi)
@@ -380,7 +385,7 @@ class TestStartingWeld:
         self,
         web_hmi: AdaptioWebHmi,
         setup_plc: PlcJsonRpc,
-        bench_psu,
+        bench_power_supply,
         weld_data_set_setup,
     ):
         """Enable bench PSU, set voltage/current, trigger READY, and verify power source status."""
@@ -405,7 +410,7 @@ class TestStartingWeld:
 
         # 2. Enable bench PSU output with voltage and current
         assert enable_bench_psu_output(
-            bench_psu, voltage=25.0, current=0.5, output=1
+            bench_power_supply, voltage=25.0, current=0.5, output=1
         ), "Bench PSU output should be enabled"
 
         # 3. Set PLC setpoint values for power source 1
