@@ -1,6 +1,8 @@
 """Configuration file for all hil/demorig tests."""
 
+import json
 import os
+import shlex
 import shutil
 import tarfile
 import time
@@ -18,7 +20,10 @@ from laserbeak import logger, setup_logging
 
 from managers import AdaptioManager, TestRailManager
 from testzilla.utility.playwright import PlaywrightManager
-from testzilla.adaptio_web_hmi.adaptio_web_hmi import AdaptioWebHmi
+from testzilla.adaptio_web_hmi.adaptio_web_hmi import (
+    AdaptioWebHmi,
+    AdaptioWebHmiMessage,
+)
 from testzilla.plc.models import PlcProgramWrite
 from testzilla.plc.plc_json_rpc import PlcJsonRpc
 from testzilla.utility.cleanup_utils import cleanup_web_hmi_client
@@ -286,6 +291,10 @@ def pytest_configure(config: pytest.Config) -> None:
 
     config.WEB_HMI_URI = f"ws://{config.ADAPTIO_EXTERNAL_IP}:8080"
 
+    # Bench power supply (AimTTi CPX200DP)
+    config.BENCH_PSU_IP = "192.168.100.231"
+    config.BENCH_PSU_PORT = 9221
+
     # Testrail
 
     config.TESTRAIL_URL = "https://esabgrnd.testrail.com"
@@ -308,6 +317,18 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers", "webhmi_settings: mark test as WebHMI settings/configuration test"
+    )
+    config.addinivalue_line(
+        "markers", "weld: mark test as weld-related test"
+    )
+    config.addinivalue_line(
+        "markers", "weld_process_parameters: mark test as weld process parameters test"
+    )
+    config.addinivalue_line(
+        "markers", "weld_data_set: mark test as weld data set test"
+    )
+    config.addinivalue_line(
+        "markers", "gen2: mark test as gen2-specific test"
     )
 
 
@@ -831,6 +852,49 @@ def setup_plc_fixture(request: pytest.FixtureRequest) -> Iterator[PlcJsonRpc]:
     plc.logout()
 
 
+@pytest.fixture(name="bench_power_supply", scope="module")
+def bench_power_supply_fixture(setup_plc: PlcJsonRpc, request: pytest.FixtureRequest):
+    """Connect to the bench power supply (Keysight / AimTTi) for HIL tests.
+
+    The supply is used to inject a voltage into the Aristo PAB so the PLC
+    sees a real "arcing" signal instead of a simulated PLC bit.
+
+    Yields the AbstractPowerSupply instance; tears down (disable output,
+    disconnect) after the module.
+    """
+    from testzilla.power_supply.power_supply_factory import PowerSupplyFactory
+    # ensure implementations are registered
+    import testzilla.power_supply.keysight_e36234a  # noqa: F401
+    import testzilla.power_supply.aimtti_cpx200dp  # noqa: F401
+
+    ip = request.config.BENCH_PSU_IP
+    if not ip:
+        pytest.skip("Bench power supply not configured")
+
+    conn = {"ip_address": ip}
+    port = request.config.BENCH_PSU_PORT
+    if port:
+        conn["port"] = port
+
+    psu = PowerSupplyFactory.create("aimtti_cpx200dp", conn)
+
+    psu.connect()
+    logger.info(f"Bench PSU connected: {psu.read_identity()}")
+    plc = setup_plc
+    plc.write(PLC_ADDR_PS1_ARCING, True)
+
+    yield psu
+
+    for output in psu.available_outputs:
+        try:
+            psu.disable_output(output)
+        except Exception:
+            pass
+    psu.disconnect()
+    logger.info("Bench PSU disconnected")
+
+
+
 @pytest.fixture(name="reset_slide_cross_positions")
 def reset_slide_cross_positions_fixture(setup_plc: PlcJsonRpc, addresses: dict) -> Iterator[None]:
     """Reset slide cross positions in PLC by homing them to a set position"""
@@ -1041,8 +1105,30 @@ def addresses_fixture() -> dict:
         "rollerbed_homing_done": (
             '"UnifiedCommonData.DB_HMI".Values.Rollerbed.Status.AxisStatus.HomingDone'
         ),
-        #"vertical_position":'"DB_UserInteraction.HMI".MotionControl.Axis.VerticalSlide.Status.Position'
- 
+        # Weld PLC addresses (DataToAdaptio)
+        "weld_start": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Start',
+        "weld_stop": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Stop',
+        "ps1_ready_to_start": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.ReadyToWeld',
+        "ps2_ready_to_start": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.ReadyToWeld',
+        "ps1_arcing": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Arcing',
+        "ps2_arcing": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Arcing',
+        # Power-source voltage / current setpoints (DataFromAdaptio)
+        "ps1_voltage_setpoint": '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource1.Voltage',
+        "ps1_current_setpoint": '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource1.Current',
+        "ps2_voltage_setpoint": '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource2.Voltage',
+        "ps2_current_setpoint": '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource2.Current',
+        # Power-source actual voltage / current (DataToAdaptio)
+        "ps1_voltage_actual": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Voltage',
+        "ps1_current_actual": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Current',
+        "ps2_voltage_actual": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Voltage',
+        "ps2_current_actual": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Current',
+        # Power-source status flags (DataToAdaptio)
+        "ps1_in_welding_sequence": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.InWeldingSequence',
+        "ps1_error": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Error',
+        "ps1_start_failure": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.StartFailure',
+        "ps2_in_welding_sequence": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.InWeldingSequence',
+        "ps2_error": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Error',
+        "ps2_start_failure": '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.StartFailure',
     }
 
 
@@ -1573,5 +1659,838 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int):
                 logger.debug(f"Error managing tasks: {e}")
     except Exception as e:
         logger.debug(f"Error during event loop cleanup at session end: {e}")
-    
+
+
+# ===========================================================================
+# Weld data handling – helpers, constants, and fixtures
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Raw websocket message helpers
+# ---------------------------------------------------------------------------
+
+def send_message(web_hmi: AdaptioWebHmi, name: str, payload: dict | None = None) -> None:
+    """Send a JSON message over the websocket."""
+    msg = AdaptioWebHmiMessage(name=name, payload=payload or {})
+    web_hmi.send_message(msg)
+
+
+def receive_by_name(web_hmi: AdaptioWebHmi, name: str, max_retries: int = 10) -> dict:
+    """Receive the next message matching *name* and return it as a plain dict.
+
+    Using raw ``json.loads`` instead of ``AdaptioWebHmiMessage`` avoids
+    Pydantic validation failures when the server response contains a list
+    payload or omits the ``payload`` key on failure.
+
+    Transient errors (timeouts, closed connections) are caught inside the
+    retry loop so that a single hiccup does not abort the entire receive
+    sequence.  Uses broad ``except Exception`` because
+    ``websockets.exceptions.ConnectionClosedError`` inherits from
+    ``Exception``, not from ``ConnectionError``.
+    """
+    web_hmi.connect()
+    for _ in range(max_retries):
+        try:
+            raw = web_hmi.ws_client.receive_message()
+            data = json.loads(raw)
+        except Exception as exc:
+            logger.debug(f"Transient error while waiting for '{name}': {exc}, retrying")
+            try:
+                web_hmi.connect()
+            except Exception as conn_exc:
+                logger.debug(f"Reconnection attempt failed: {conn_exc}")
+            continue
+        if data.get("name") == name:
+            return data
+    raise TimeoutError(f"Did not receive '{name}' within {max_retries} attempts")
+
+
+def send_and_receive(
+    web_hmi: AdaptioWebHmi,
+    request_name: str,
+    response_name: str,
+    payload: dict | None = None,
+    max_retries: int = 10,
+) -> dict:
+    """Send a request and wait for the matching response (as a raw dict)."""
+    send_message(web_hmi, request_name, payload)
+    return receive_by_name(web_hmi, response_name, max_retries=max_retries)
+
+
+# ---------------------------------------------------------------------------
+# Default weld process parameter payloads (mirror C++ block-test data)
+# ---------------------------------------------------------------------------
+
+WPP_DEFAULT_WS1: dict[str, Any] = {
+    "name": "ManualWS1",
+    "method": "dc",
+    "regulationType": "cc",
+    "startAdjust": 10,
+    "startType": "scratch",
+    "voltage": 25.0,
+    "current": 200.0,
+    "wireSpeed": 15.0,
+    "iceWireSpeed": 0.0,
+    "acFrequency": 60.0,
+    "acOffset": 1.2,
+    "acPhaseShift": 0.5,
+    "craterFillTime": 2.0,
+    "burnBackTime": 1.0,
+}
+
+WPP_DEFAULT_WS2: dict[str, Any] = {
+    "name": "ManualWS2",
+    "method": "dc",
+    "regulationType": "cc",
+    "startAdjust": 10,
+    "startType": "direct",
+    "voltage": 28.0,
+    "current": 180.0,
+    "wireSpeed": 14.0,
+    "iceWireSpeed": 0.0,
+    "acFrequency": 60.0,
+    "acOffset": 1.2,
+    "acPhaseShift": 0.5,
+    "craterFillTime": 2.0,
+    "burnBackTime": 1.0,
+}
+
+# ---------------------------------------------------------------------------
+# CRUD helper functions
+# ---------------------------------------------------------------------------
+
+
+def get_weld_process_parameters(web_hmi: AdaptioWebHmi) -> list[dict]:
+    """Return the list of stored weld process parameters."""
+    rsp = send_and_receive(web_hmi, "GetWeldProcessParameters", "GetWeldProcessParametersRsp")
+    return rsp.get("payload", [])
+
+
+def add_weld_process_parameters(web_hmi: AdaptioWebHmi, params: dict | None = None, **kwargs) -> dict | bool:
+    """Add a weld process parameter set.
+
+    Accepts either a single *params* dict or keyword arguments.  Returns the
+    full response dict when called with *params*, or ``True``/``False`` when
+    called with keyword arguments (for compatibility with the new test style).
+    """
+    if params is not None:
+        return send_and_receive(web_hmi, "AddWeldProcessParameters", "AddWeldProcessParametersRsp", params)
+    # keyword-argument style
+    payload = dict(kwargs)
+    try:
+        rsp = send_and_receive(web_hmi, "AddWeldProcessParameters", "AddWeldProcessParametersRsp", payload)
+        return rsp.get("result") == "ok"
+    except Exception:
+        return False
+
+
+def update_weld_process_parameters(web_hmi: AdaptioWebHmi, wpp_id: int, params: dict) -> dict:
+    """Update a weld process parameter set.  Returns the full response dict."""
+    payload = {**params, "id": wpp_id}
+    return send_and_receive(web_hmi, "UpdateWeldProcessParameters", "UpdateWeldProcessParametersRsp", payload)
+
+
+def remove_weld_process_parameters(web_hmi: AdaptioWebHmi, wpp_id: int) -> dict:
+    """Remove a weld process parameter set.  Returns the full response dict."""
+    return send_and_receive(
+        web_hmi, "RemoveWeldProcessParameters", "RemoveWeldProcessParametersRsp", {"id": wpp_id}
+    )
+
+
+def get_weld_data_sets(web_hmi: AdaptioWebHmi) -> list[dict]:
+    """Return the list of stored weld data sets."""
+    rsp = send_and_receive(web_hmi, "GetWeldDataSets", "GetWeldDataSetsRsp")
+    return rsp.get("payload", [])
+
+
+def add_weld_data_set(web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int) -> dict:
+    """Add a weld data set.  Returns the full response dict.
+
+    On communication failure returns ``{"result": "fail"}``.
+    """
+    payload = {"name": name, "ws1WppId": ws1_wpp_id, "ws2WppId": ws2_wpp_id}
+    try:
+        return send_and_receive(web_hmi, "AddWeldDataSet", "AddWeldDataSetRsp", payload)
+    except Exception:
+        return {"result": "fail"}
+
+
+def update_weld_data_set(
+    web_hmi: AdaptioWebHmi, wds_id: int, name: str, ws1_wpp_id: int, ws2_wpp_id: int
+) -> dict:
+    """Update a weld data set.  Returns the full response dict."""
+    payload = {"id": wds_id, "name": name, "ws1WppId": ws1_wpp_id, "ws2WppId": ws2_wpp_id}
+    return send_and_receive(web_hmi, "UpdateWeldDataSet", "UpdateWeldDataSetRsp", payload)
+
+
+def remove_weld_data_set(web_hmi: AdaptioWebHmi, wds_id: int) -> dict:
+    """Remove a weld data set.  Returns the full response dict."""
+    return send_and_receive(web_hmi, "RemoveWeldDataSet", "RemoveWeldDataSetRsp", {"id": wds_id})
+
+
+def select_weld_data_set(web_hmi: AdaptioWebHmi, wds_id: int | None = None, weld_data_set_id: int | None = None) -> dict:
+    """Select a weld data set.  Returns the full response dict.
+
+    Accepts either ``wds_id`` (legacy) or ``weld_data_set_id`` (new style).
+    At least one must be provided.
+    """
+    effective_id = weld_data_set_id if weld_data_set_id is not None else wds_id
+    if effective_id is None:
+        raise ValueError("Either wds_id or weld_data_set_id must be provided")
+    return send_and_receive(web_hmi, "SelectWeldDataSet", "SelectWeldDataSetRsp", {"id": effective_id})
+
+
+def get_weld_programs(web_hmi: AdaptioWebHmi) -> list[dict]:
+    """Return the list of stored weld programs."""
+    rsp = send_and_receive(web_hmi, "GetWeldPrograms", "GetWeldProgramsRsp")
+    return rsp.get("payload", [])
+
+
+def remove_weld_program(web_hmi: AdaptioWebHmi, prog_id: int) -> dict:
+    """Remove a weld program.  Returns the full response dict."""
+    return send_and_receive(web_hmi, "RemoveWeldProgram", "RemoveWeldProgramRsp", {"id": prog_id})
+
+
+# ---------------------------------------------------------------------------
+# Arc state helpers
+# ---------------------------------------------------------------------------
+
+def subscribe_arc_state(web_hmi: AdaptioWebHmi) -> str | None:
+    """Subscribe to arc-state push notifications and return the initial state.
+
+    ``SubscribeArcState`` causes the device to push the current state
+    immediately (as an ``ArcState`` message) followed by subsequent
+    unsolicited pushes on every transition.
+
+    Returns the state string (e.g. ``"idle"``) or ``None`` if the
+    device does not respond.
+    """
+    try:
+        send_message(web_hmi, "SubscribeArcState")
+        msg = receive_by_name(web_hmi, "ArcState")
+        return msg.get("payload", {}).get("state")
+    except Exception:
+        logger.debug("subscribe_arc_state: failed to receive initial ArcState")
+        return None
+
+
+def receive_arc_state(web_hmi: AdaptioWebHmi, max_retries: int = 10) -> str | None:
+    """Wait for the next ``ArcState`` push message and return the state string.
+
+    Returns ``None`` if no message is received within *max_retries* attempts.
+    """
+    try:
+        msg = receive_by_name(web_hmi, "ArcState", max_retries=max_retries)
+        return msg.get("payload", {}).get("state")
+    except Exception:
+        logger.debug("receive_arc_state: failed to receive ArcState push")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# PLC weld address constants
+# ---------------------------------------------------------------------------
+
+PLC_ADDR_START = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Start'
+PLC_ADDR_STOP = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.Adaptio.Stop'
+PLC_ADDR_PS1_READY_TO_START = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.ReadyToWeld'
+PLC_ADDR_PS2_READY_TO_START = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.ReadyToWeld'
+PLC_ADDR_PS1_ARCING = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Arcing'
+PLC_ADDR_PS2_ARCING = '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Arcing'
+
+# DataFromAdaptio – setpoint values (Adaptio → PLC → power source)
+PLC_ADDR_PS1_VOLTAGE_SETPOINT = (
+    '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource1.Voltage'
+)
+PLC_ADDR_PS1_CURRENT_SETPOINT = (
+    '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource1.Current'
+)
+PLC_ADDR_PS2_VOLTAGE_SETPOINT = (
+    '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource2.Voltage'
+)
+PLC_ADDR_PS2_CURRENT_SETPOINT = (
+    '"Adaptio.DB_AdaptioCommunication".DataFromAdaptio.PowerSource2.Current'
+)
+
+# DataToAdaptio – actual (feedback) values reported by the power source
+PLC_ADDR_PS1_VOLTAGE_ACTUAL = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Voltage'
+)
+PLC_ADDR_PS1_CURRENT_ACTUAL = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Current'
+)
+PLC_ADDR_PS2_VOLTAGE_ACTUAL = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Voltage'
+)
+PLC_ADDR_PS2_CURRENT_ACTUAL = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Current'
+)
+
+# DataToAdaptio – additional status flags
+PLC_ADDR_PS1_IN_WELDING_SEQ = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.InWeldingSequence'
+)
+PLC_ADDR_PS1_ERROR = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.Error'
+)
+PLC_ADDR_PS1_START_FAILURE = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource1.StartFailure'
+)
+PLC_ADDR_PS2_IN_WELDING_SEQ = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.InWeldingSequence'
+)
+PLC_ADDR_PS2_ERROR = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.Error'
+)
+PLC_ADDR_PS2_START_FAILURE = (
+    '"Adaptio.DB_AdaptioCommunication".DataToAdaptio.PowerSource2.StartFailure'
+)
+
+
+def simulate_power_sources_ready(plc: "PlcJsonRpc") -> bool:
+    """Set both power source ReadyToWeld flags to True via PLC.
+
+    This simulates the power sources reporting ready, which triggers the
+    arc state machine transition CONFIGURED → READY.
+    Returns ``True`` if both writes succeed, ``False`` on failure.
+    """
+    try:
+        _, err1 = plc.write(PLC_ADDR_PS1_READY_TO_START, True)
+        _, err2 = plc.write(PLC_ADDR_PS2_READY_TO_START, True)
+        if err1 or err2:
+            logger.warning(f"simulate_power_sources_ready failed: err1={err1}, err2={err2}")
+            return False
+        return True
+    except Exception as exc:
+        logger.warning(f"simulate_power_sources_ready failed: {exc}")
+        return False
+
+
+def simulate_weld_start(plc: "PlcJsonRpc") -> bool:
+    """Press the start button via PLC.
+
+    This triggers READY → STARTING in the arc state machine.
+    The start signal is pulsed (True → 0.3 s → False).
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    try:
+        _, err = plc.write(PLC_ADDR_START, True)
+        if err:
+            logger.warning(f"simulate_weld_start failed: {err}")
+            return False
+        time.sleep(0.3)
+        plc.write(PLC_ADDR_START, False)
+        return True
+    except Exception as exc:
+        logger.warning(f"simulate_weld_start failed: {exc}")
+        return False
+
+
+def simulate_arcing(psu) -> bool:
+    """Apply arc voltage via the bench power supply.
+
+    This triggers STARTING → ACTIVE in the arc state machine by causing
+    the Aristo PAB to detect an arcing signal through the hardware chain.
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    try:
+        apply_arc_voltage(psu)
+        return True
+    except Exception as exc:
+        logger.warning(f"simulate_arcing failed: {exc}")
+        return False
+
+
+def simulate_arcing_stopped(psu) -> bool:
+    """Remove arc voltage via the bench power supply.
+
+    When the Aristo PAB no longer detects arcing the arc state machine
+    transitions ACTIVE → READY (after stop).
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    try:
+        remove_arc_voltage(psu)
+        return True
+    except Exception as exc:
+        logger.warning(f"simulate_arcing_stopped failed: {exc}")
+        return False
+
+
+def simulate_weld_stop(plc: "PlcJsonRpc") -> bool:
+    """Press the stop button via PLC.
+
+    This sends the stop command to the weld system (from STARTING or ACTIVE).
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    try:
+        _, err = plc.write(PLC_ADDR_STOP, True)
+        if err:
+            logger.warning(f"simulate_weld_stop failed: {err}")
+            return False
+        return True
+    except Exception as exc:
+        logger.warning(f"simulate_weld_stop failed: {exc}")
+        return False
+
+
+def reset_plc_weld_signals(plc: "PlcJsonRpc") -> None:
+    """Reset all PLC weld signals to their default (off) state.
+
+    Called during teardown to leave the PLC in a clean state.
+    """
+    for addr in (
+        PLC_ADDR_START,
+        PLC_ADDR_STOP,
+        PLC_ADDR_PS1_READY_TO_START,
+        PLC_ADDR_PS2_READY_TO_START,
+        PLC_ADDR_PS1_ARCING,
+        PLC_ADDR_PS2_ARCING,
+    ):
+        try:
+            plc.write(addr, False)
+        except Exception as exc:
+            logger.debug(f"reset_plc_weld_signals: failed to reset {addr}: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# PLC power-source voltage / current / status helpers
+# ---------------------------------------------------------------------------
+
+
+def set_power_source_voltage(
+    plc: "PlcJsonRpc", voltage: float, ps: int = 1
+) -> bool:
+    """Write a voltage setpoint to a power source via PLC (DataFromAdaptio).
+
+    *ps* selects the power source (1 or 2).
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    addr = PLC_ADDR_PS1_VOLTAGE_SETPOINT if ps == 1 else PLC_ADDR_PS2_VOLTAGE_SETPOINT
+    try:
+        _, err = plc.write(addr, voltage)
+        if err:
+            logger.warning(f"set_power_source_voltage(ps={ps}) failed: {err}")
+            return False
+        return True
+    except Exception as exc:
+        logger.warning(f"set_power_source_voltage(ps={ps}) failed: {exc}")
+        return False
+
+
+def set_power_source_current(
+    plc: "PlcJsonRpc", current: float, ps: int = 1
+) -> bool:
+    """Write a current setpoint to a power source via PLC (DataFromAdaptio).
+
+    *ps* selects the power source (1 or 2).
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    addr = PLC_ADDR_PS1_CURRENT_SETPOINT if ps == 1 else PLC_ADDR_PS2_CURRENT_SETPOINT
+    try:
+        _, err = plc.write(addr, current)
+        if err:
+            logger.warning(f"set_power_source_current(ps={ps}) failed: {err}")
+            return False
+        return True
+    except Exception as exc:
+        logger.warning(f"set_power_source_current(ps={ps}) failed: {exc}")
+        return False
+
+
+def read_power_source_status(
+    plc: "PlcJsonRpc", ps: int = 1
+) -> dict | None:
+    """Read the current status of a power source via PLC (DataToAdaptio).
+
+    Returns a dict with keys:
+        ready_to_weld, in_welding_sequence, arcing, start_failure, error,
+        voltage, current
+    or ``None`` if any read fails.
+    """
+    if ps == 1:
+        addrs = {
+            "ready_to_weld": PLC_ADDR_PS1_READY_TO_START,
+            "in_welding_sequence": PLC_ADDR_PS1_IN_WELDING_SEQ,
+            "arcing": PLC_ADDR_PS1_ARCING,
+            "start_failure": PLC_ADDR_PS1_START_FAILURE,
+            "error": PLC_ADDR_PS1_ERROR,
+            "voltage": PLC_ADDR_PS1_VOLTAGE_ACTUAL,
+            "current": PLC_ADDR_PS1_CURRENT_ACTUAL,
+        }
+    else:
+        addrs = {
+            "ready_to_weld": PLC_ADDR_PS2_READY_TO_START,
+            "in_welding_sequence": PLC_ADDR_PS2_IN_WELDING_SEQ,
+            "arcing": PLC_ADDR_PS2_ARCING,
+            "start_failure": PLC_ADDR_PS2_START_FAILURE,
+            "error": PLC_ADDR_PS2_ERROR,
+            "voltage": PLC_ADDR_PS2_VOLTAGE_ACTUAL,
+            "current": PLC_ADDR_PS2_CURRENT_ACTUAL,
+        }
+
+    result: dict = {}
+    try:
+        for key, addr in addrs.items():
+            val, err = plc.read(addr)
+            if err:
+                logger.warning(
+                    f"read_power_source_status(ps={ps}): "
+                    f"failed to read {key} ({addr}): {err}"
+                )
+                return None
+            result[key] = val
+    except Exception as exc:
+        logger.warning(f"read_power_source_status(ps={ps}) failed: {exc}")
+        return None
+
+    return result
+
+
+def enable_bench_psu_output(
+    psu,
+    voltage: float,
+    current: float,
+    output: int = 1,
+) -> bool:
+    """Configure and enable a bench power-supply output.
+
+    Sets *voltage* and *current* on the given *output*, then enables it.
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    try:
+        psu.set_voltage(voltage, output)
+        psu.set_current(current, output)
+        psu.enable_output(output)
+        logger.info(
+            f"Bench PSU output {output}: {voltage} V / {current} A enabled"
+        )
+        return True
+    except Exception as exc:
+        logger.warning(f"enable_bench_psu_output(output={output}) failed: {exc}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Arcing via bench power supply helpers
+# ---------------------------------------------------------------------------
+
+ARCING_VOLTAGE = 25.0
+ARCING_CURRENT_LIMIT = 0.5
+
+
+def apply_arc_voltage(psu, voltage: float = ARCING_VOLTAGE, output: int = 1) -> None:
+    """Set voltage on the bench PSU so the Aristo PAB sees an arcing signal."""
+    psu.set_voltage(voltage, output)
+    psu.set_current(ARCING_CURRENT_LIMIT, output)
+    psu.enable_output(output)
+    logger.info(f"Bench PSU output {output}: {voltage} V / {ARCING_CURRENT_LIMIT} A enabled")
+
+
+def remove_arc_voltage(psu, output: int = 1) -> None:
+    """Remove voltage from the bench PSU to stop the arcing signal."""
+    psu.set_voltage(0.0, output)
+    psu.disable_output(output)
+    logger.info(f"Bench PSU output {output} disabled")
+
+
+def wait_for_plc_value(plc: "PlcJsonRpc", address: str, expected, retries: int = 20, interval: float = 0.5):
+    """Poll a PLC variable until it matches *expected* or retries are exhausted."""
+    for _ in range(retries):
+        value, _ = plc.read(var=address)
+        if value == expected:
+            return value
+        time.sleep(interval)
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Database deletion helper
+# ---------------------------------------------------------------------------
+
+def delete_adaptio_database(
+    adaptio_manager: AdaptioManager,
+    db_path,
+) -> bool:
+    """Stop Adaptio, delete the database file, and restart.
+
+    Returns ``True`` on success, ``False`` on failure.  The restart causes
+    Adaptio to re-create the database via ``SQLite::OPEN_CREATE`` (see
+    ``main.cc``).
+    """
+    try:
+        adaptio_manager.stop_adaptio()
+        cmd = f"rm -f {shlex.quote(str(db_path))}"
+        _, stderr, exit_code = adaptio_manager.manager.execute_command(
+            command=cmd, sudo=True
+        )
+        if exit_code != 0:
+            logger.warning(f"Failed to delete database file {db_path}: {stderr}")
+            return False
+        logger.info(f"Deleted database file {db_path}")
+        adaptio_manager.start_adaptio()
+        return True
+    except Exception as exc:
+        logger.warning(f"delete_adaptio_database failed: {exc}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# WPP configuration presets
+# ---------------------------------------------------------------------------
+
+def get_weld_process_parameters_config(weld_system: str) -> dict:
+    """Return default weld process parameters for the given weld system.
+
+    Args:
+        weld_system: ``"ws1"`` or ``"ws2"``.
+
+    Returns:
+        A dict suitable for passing as ``**kwargs`` to
+        ``add_weld_process_parameters`` or directly as a payload.
+    """
+    if weld_system == "ws1":
+        return dict(WPP_DEFAULT_WS1)
+    elif weld_system == "ws2":
+        return dict(WPP_DEFAULT_WS2)
+    else:
+        raise ValueError(f"Unknown weld system: {weld_system!r}  (expected 'ws1' or 'ws2')")
+
+
+# ---------------------------------------------------------------------------
+# Clean-up helpers
+# ---------------------------------------------------------------------------
+
+def clean_weld_data(web_hmi: AdaptioWebHmi) -> None:
+    """Remove **all** weld programs, weld data sets, and weld process parameters.
+
+    Removal order matters:
+      WeldPrograms → WeldDataSets → WeldProcessParameters
+    The adaptio module prevents removal of a WDS used by a program and of a
+    WPP used by a WDS.
+    """
+    # 1. Remove weld programs
+    for prog in get_weld_programs(web_hmi):
+        prog_id = prog.get("id")
+        if prog_id is not None:
+            rsp = remove_weld_program(web_hmi, prog_id)
+            logger.debug(f"Removed WeldProgram id={prog_id}: {rsp.get('result')}")
+
+    # 2. Remove weld data sets
+    for wds in get_weld_data_sets(web_hmi):
+        wds_id = wds.get("id")
+        if wds_id is not None:
+            rsp = remove_weld_data_set(web_hmi, wds_id)
+            logger.debug(f"Removed WDS id={wds_id}: {rsp.get('result')}")
+
+    # 3. Remove weld process parameters
+    for wpp in get_weld_process_parameters(web_hmi):
+        wpp_id = wpp.get("id")
+        if wpp_id is not None:
+            rsp = remove_weld_process_parameters(web_hmi, wpp_id)
+            logger.debug(f"Removed WPP id={wpp_id}: {rsp.get('result')}")
+
+
+def ensure_weld_process_parameters(web_hmi: AdaptioWebHmi, params: dict) -> int:
+    """Ensure a WPP with the given *name* exists.  Returns its id.
+
+    If a WPP with the same name already exists it is updated; otherwise a
+    new one is added.  Using upsert avoids SQLite auto-increment ID growth
+    across repeated test runs on a persistent device database.
+    """
+    existing = get_weld_process_parameters(web_hmi)
+    for wpp in existing:
+        if wpp.get("name") == params.get("name"):
+            wpp_id = wpp["id"]
+            update_weld_process_parameters(web_hmi, wpp_id, params)
+            return wpp_id
+
+    add_weld_process_parameters(web_hmi, params)
+    updated = get_weld_process_parameters(web_hmi)
+    for wpp in updated:
+        if wpp.get("name") == params.get("name"):
+            return wpp["id"]
+    raise RuntimeError(f"Failed to ensure WPP with name={params.get('name')}")
+
+
+def ensure_weld_data_set(
+    web_hmi: AdaptioWebHmi, name: str, ws1_wpp_id: int, ws2_wpp_id: int
+) -> int:
+    """Ensure a WDS with the given *name* exists.  Returns its id."""
+    existing = get_weld_data_sets(web_hmi)
+    for wds in existing:
+        if wds.get("name") == name:
+            wds_id = wds["id"]
+            update_weld_data_set(web_hmi, wds_id, name, ws1_wpp_id, ws2_wpp_id)
+            return wds_id
+
+    add_weld_data_set(web_hmi, name, ws1_wpp_id, ws2_wpp_id)
+    updated = get_weld_data_sets(web_hmi)
+    for wds in updated:
+        if wds.get("name") == name:
+            return wds["id"]
+    raise RuntimeError(f"Failed to ensure WDS with name={name}")
+
+
+# ---------------------------------------------------------------------------
+# Weld fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(name="web_hmi")
+def web_hmi_fixture(request: pytest.FixtureRequest):
+    """Provide an AdaptioWebHmi client connected to the device."""
+    uri = request.config.WEB_HMI_URI
+    client = AdaptioWebHmi(uri=uri)
+    try:
+        client.connect()
+    except Exception:
+        pytest.skip("Could not connect to Adaptio WebHMI")
+
+    yield client
+
+    cleanup_web_hmi_client(client)
+
+
+@pytest.fixture(name="clean_weld_state")
+def clean_weld_state_fixture(request: pytest.FixtureRequest, web_hmi: AdaptioWebHmi):
+    """Remove all weld data before and after the test.
+
+    If the initial cleanup fails (e.g. the database file does not exist),
+    the fixture checks database availability via ``ensure_db_available``
+    and restarts Adaptio to create the database if necessary – following
+    the same pattern as ``update_adaptio_config`` in
+    ``test_joint_tracking.py``.
+    """
+    try:
+        clean_weld_data(web_hmi)
+    except Exception:
+        logger.info("clean_weld_data failed, checking database availability")
+        try:
+            adaptio_manager: AdaptioManager = request.getfixturevalue("adaptio_manager")
+            if ensure_db_available(request, adaptio_manager):
+                # Adaptio was restarted – reconnect and retry
+                web_hmi.connect()
+            clean_weld_data(web_hmi)
+        except Exception:
+            pytest.skip("Could not clean weld data or ensure database")
+
+    yield
+
+    try:
+        clean_weld_data(web_hmi)
+    except Exception:
+        logger.warning("Post-test weld data cleanup failed")
+
+
+@pytest.fixture(name="seeded_weld_data")
+def seeded_weld_data_fixture(web_hmi: AdaptioWebHmi, clean_weld_state):
+    """Ensure two WPPs and one WDS exist.
+
+    Returns:
+        tuple[int, int, int]: (ws1_id, ws2_id, wds_id)
+    """
+    try:
+        ws1_id = ensure_weld_process_parameters(web_hmi, WPP_DEFAULT_WS1)
+        ws2_id = ensure_weld_process_parameters(web_hmi, WPP_DEFAULT_WS2)
+        wds_id = ensure_weld_data_set(web_hmi, "TestWeld", ws1_id, ws2_id)
+    except Exception:
+        pytest.skip("Could not seed weld data")
+
+    return ws1_id, ws2_id, wds_id
+
+
+# ---------------------------------------------------------------------------
+# Database availability helpers
+# ---------------------------------------------------------------------------
+
+def ensure_db_available(
+    request: pytest.FixtureRequest,
+    adaptio_manager: AdaptioManager,
+) -> bool:
+    """Check if the Adaptio database file exists and create it if not.
+
+    If the database file is not available, restarts Adaptio so it re-creates
+    the database via ``SQLite::OPEN_CREATE`` (see ``main.cc``).
+
+    Returns ``True`` if a restart was performed, ``False`` if the database
+    already existed.
+
+    Reference: ``test_joint_tracking.py`` → ``update_adaptio_config`` fixture.
+    """
+    db_path = request.config.ADAPTIO_USER_CONFIG_PATH / request.config.ADAPTIO_DB
+    cmd = f"test -f {shlex.quote(str(db_path))}"
+    _, _, exit_code = adaptio_manager.manager.execute_command(
+        command=cmd, sudo=True
+    )
+    if exit_code != 0:
+        logger.info(f"Database file {db_path} not found, restarting Adaptio to create it")
+        adaptio_manager.restart_adaptio()
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Database recreation helpers and fixtures
+# ---------------------------------------------------------------------------
+
+def delete_adaptio_db(adaptio_manager: AdaptioManager) -> None:
+    """Delete the Adaptio database file on the remote device.
+
+    Uses the same approach as ``AdaptioManager._cleanup_user_config`` but
+    targets only the database file.  Adaptio must be stopped before calling
+    this function; after a restart it will re-create the database via
+    ``SQLite::OPEN_CREATE`` (see ``main.cc``).
+    """
+    db_file = (
+        adaptio_manager.request.config.ADAPTIO_USER_CONFIG_PATH
+        / adaptio_manager.request.config.ADAPTIO_DB
+    )
+    cmd = f"rm -f {shlex.quote(str(db_file))}"
+    _, stderr, exit_code = adaptio_manager.manager.execute_command(
+        command=cmd, sudo=True
+    )
+    if exit_code != 0:
+        logger.warning(f"Failed to delete database file {db_file}: {stderr}")
+    else:
+        logger.info(f"Deleted database file {db_file}")
+
+
+@pytest.fixture(name="ensure_fresh_db")
+def ensure_fresh_db_fixture(
+    request: pytest.FixtureRequest,
+    adaptio_manager: AdaptioManager,
+) -> Iterator[AdaptioWebHmi]:
+    """Delete the Adaptio database and restart the service so it is recreated.
+
+    Yields a freshly-connected ``AdaptioWebHmi`` client.  On teardown the
+    database is deleted once more and Adaptio is restarted to leave the
+    device in a clean state (same pattern as ``update_adaptio_config``).
+
+    Reference: ``test_joint_tracking.py`` → ``update_adaptio_config`` fixture.
+    """
+    try:
+        adaptio_manager.stop_adaptio()
+        delete_adaptio_db(adaptio_manager)
+        adaptio_manager.start_adaptio()
+    except Exception:
+        pytest.skip("Could not recreate Adaptio database")
+
+    uri = request.config.WEB_HMI_URI
+    client = AdaptioWebHmi(uri=uri)
+    try:
+        client.connect()
+    except Exception:
+        pytest.skip("Could not connect to Adaptio WebHMI after DB recreation")
+
+    yield client
+
+    cleanup_web_hmi_client(client)
+
+    # Restore: delete DB and restart so the device is clean for the next test
+    try:
+        adaptio_manager.stop_adaptio()
+        delete_adaptio_db(adaptio_manager)
+        adaptio_manager.start_adaptio()
+    except Exception:
+        logger.warning("Post-test database cleanup failed")
+
 
